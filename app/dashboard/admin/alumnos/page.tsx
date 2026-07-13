@@ -50,12 +50,20 @@ export default function StudentsPage() {
 
   return (
     <section>
-      <div className="mb-6">
-        <p className="text-sm font-medium text-sky-600">Administración</p>
-        <h1 className="mt-1 text-3xl font-bold text-slate-950">Alumnos</h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Consulta los alumnos registrados y su estado actual.
-        </p>
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-medium text-sky-600">Administración</p>
+          <h1 className="mt-1 text-3xl font-bold text-slate-950">Alumnos</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Consulta los alumnos registrados y su estado actual.
+          </p>
+        </div>
+        <Link
+          href="/dashboard/admin/alumnos/nuevo"
+          className="inline-flex items-center justify-center rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
+        >
+          Nuevo alumno
+        </Link>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

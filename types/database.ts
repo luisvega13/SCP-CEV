@@ -6,6 +6,7 @@ export type TipoPago = "inscripcion" | "mensualidad";
 export type Alumno = {
   id: string;
   nombre: string;
+  matricula: string | null;
   nivel: NivelEscolar;
   grado: number;
   grupo: string;
@@ -16,7 +17,16 @@ export type Alumno = {
   usuario_id: string;
 };
 
-export type AlumnoInsert = Omit<Alumno, "id"> & { id?: string };
+export type AlumnoInsert = Omit<
+  Alumno,
+  "id" | "matricula" | "estado" | "deuda_mensualidad" | "deuda_inscripcion"
+> & {
+  id?: string;
+  matricula: string;
+  estado?: EstadoAlumno;
+  deuda_mensualidad?: number;
+  deuda_inscripcion?: number;
+};
 export type AlumnoUpdate = Partial<AlumnoInsert>;
 
 export type Pago = {
@@ -46,7 +56,15 @@ export type Database = {
         Row: Pago;
         Insert: PagoInsert;
         Update: PagoUpdate;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "pagos_alumno_id_fkey";
+            columns: ["alumno_id"];
+            isOneToOne: false;
+            referencedRelation: "alumnos";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
     Views: Record<string, never>;
