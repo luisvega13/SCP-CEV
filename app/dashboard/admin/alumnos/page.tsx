@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type { Alumno } from "@/types/database";
@@ -14,6 +14,9 @@ export default function StudentsPage() {
   const [students, setStudents] = useState<Alumno[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [levelFilter, setLevelFilter] = useState("todos");
+  const [gradeFilter, setGradeFilter] = useState("todos");
+  const [groupFilter, setGroupFilter] = useState("todos");
 
   useEffect(() => {
     let isMounted = true;
@@ -48,6 +51,50 @@ export default function StudentsPage() {
     };
   }, []);
 
+  const availableGrades = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          students
+            .filter(
+              (student) =>
+                levelFilter === "todos" || student.nivel === levelFilter,
+            )
+            .map((student) => student.grado),
+        ),
+      ).sort((first, second) => first - second),
+    [levelFilter, students],
+  );
+
+  const availableGroups = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          students
+            .filter(
+              (student) =>
+                (levelFilter === "todos" || student.nivel === levelFilter) &&
+                (gradeFilter === "todos" ||
+                  student.grado === Number(gradeFilter)),
+            )
+            .map((student) => student.grupo),
+        ),
+      ).sort((first, second) => first.localeCompare(second, "es")),
+    [gradeFilter, levelFilter, students],
+  );
+
+  const filteredStudents = useMemo(
+    () =>
+      students.filter(
+        (student) =>
+          (levelFilter === "todos" || student.nivel === levelFilter) &&
+          (gradeFilter === "todos" ||
+            student.grado === Number(gradeFilter)) &&
+          (groupFilter === "todos" || student.grupo === groupFilter),
+      ),
+    [gradeFilter, groupFilter, levelFilter, students],
+  );
+
   return (
     <section>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -64,6 +111,77 @@ export default function StudentsPage() {
         >
           Nuevo alumno
         </Link>
+      </div>
+
+      <div className="mb-6 grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-3">
+        <div>
+          <label
+            htmlFor="levelFilter"
+            className="text-xs font-semibold uppercase tracking-wider text-slate-500"
+          >
+            Nivel
+          </label>
+          <select
+            id="levelFilter"
+            value={levelFilter}
+            onChange={(event) => {
+              setLevelFilter(event.target.value);
+              setGradeFilter("todos");
+              setGroupFilter("todos");
+            }}
+            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+          >
+            <option value="todos">Todos los niveles</option>
+            <option value="primaria">Primaria</option>
+            <option value="secundaria">Secundaria</option>
+            <option value="bachillerato">Bachillerato</option>
+          </select>
+        </div>
+        <div>
+          <label
+            htmlFor="gradeFilter"
+            className="text-xs font-semibold uppercase tracking-wider text-slate-500"
+          >
+            Grado
+          </label>
+          <select
+            id="gradeFilter"
+            value={gradeFilter}
+            onChange={(event) => {
+              setGradeFilter(event.target.value);
+              setGroupFilter("todos");
+            }}
+            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+          >
+            <option value="todos">Todos los grados</option>
+            {availableGrades.map((grade) => (
+              <option key={grade} value={grade}>
+                {grade}°
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label
+            htmlFor="groupFilter"
+            className="text-xs font-semibold uppercase tracking-wider text-slate-500"
+          >
+            Grupo
+          </label>
+          <select
+            id="groupFilter"
+            value={groupFilter}
+            onChange={(event) => setGroupFilter(event.target.value)}
+            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+          >
+            <option value="todos">Todos los grupos</option>
+            {availableGroups.map((group) => (
+              <option key={group} value={group}>
+                {group}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -106,17 +224,17 @@ export default function StudentsPage() {
                 </tr>
               )}
 
-              {!isLoading && !error && students.length === 0 && (
+              {!isLoading && !error && filteredStudents.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">
-                    No hay alumnos registrados.
+                    No hay alumnos que coincidan con los filtros seleccionados.
                   </td>
                 </tr>
               )}
 
               {!isLoading &&
                 !error &&
-                students.map((student) => (
+                filteredStudents.map((student) => (
                   <tr key={student.id} className="transition-colors hover:bg-slate-50">
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-slate-900">
                       {student.nombre}

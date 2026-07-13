@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type { UserRole } from "@/types/user";
 
@@ -22,8 +22,15 @@ const linksByRole: Record<UserRole, Array<{ label: string; href: string }>> = {
 
 export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const dashboardHome =
+    role === "admin" ? "/dashboard/admin" : "/dashboard/alumno";
+
+  function isActiveLink(href: string) {
+    return pathname === href || pathname.startsWith(`${href}/`);
+  }
 
   async function handleSignOut() {
     setIsSigningOut(true);
@@ -43,16 +50,47 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-30 flex h-16 items-center justify-between border-b bg-white px-4 md:hidden">
-        <Link href={role === "admin" ? "/dashboard/admin" : "/dashboard/alumno"} className="font-semibold">Gestión Escolar</Link>
+        <Link href={dashboardHome} className="font-semibold">
+          Portal Escolar
+        </Link>
         <button type="button" onClick={() => setIsOpen(!isOpen)} className="rounded-lg border p-2" aria-label="Abrir menú" aria-expanded={isOpen}>
           <span className="block h-0.5 w-5 bg-current" /><span className="my-1 block h-0.5 w-5 bg-current" /><span className="block h-0.5 w-5 bg-current" />
         </button>
       </header>
       {isOpen && <button type="button" className="fixed inset-0 z-30 bg-slate-950/40 md:hidden" onClick={() => setIsOpen(false)} aria-label="Cerrar menú" />}
       <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-950 px-4 py-6 text-white transition-transform md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="mb-8 px-3"><p className="text-xs uppercase tracking-[0.2em] text-sky-400">Portal escolar</p><p className="mt-2 text-xl font-semibold">Gestión de pagos</p></div>
+        <Link
+          href={dashboardHome}
+          onClick={() => setIsOpen(false)}
+          aria-current={pathname === dashboardHome ? "page" : undefined}
+          className={`mb-8 block rounded-lg px-3 py-2 transition hover:bg-slate-900 ${
+            pathname === dashboardHome ? "bg-slate-900 ring-1 ring-slate-800" : ""
+          }`}
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-400">
+            Portal Escolar
+          </p>
+          <p className="mt-2 text-xl font-semibold">Gestión de pagos</p>
+        </Link>
         <nav className="flex-1 space-y-1" aria-label="Navegación principal">
-          {linksByRole[role].map((link) => <Link key={link.href} href={link.href} onClick={() => setIsOpen(false)} className="block rounded-lg px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white">{link.label}</Link>)}
+          {linksByRole[role].map((link) => {
+            const isActive = isActiveLink(link.href);
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setIsOpen(false)}
+                aria-current={isActive ? "page" : undefined}
+                className={`block rounded-lg border-l-2 px-3 py-2.5 text-sm font-medium transition ${
+                  isActive
+                    ? "border-sky-400 bg-slate-800 text-white"
+                    : "border-transparent text-slate-300 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
         </nav>
         <div className="border-t border-slate-800 px-3 pt-4">
           <p className="truncate text-sm font-medium">{userName}</p>

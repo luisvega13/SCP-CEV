@@ -5,15 +5,25 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   Alumno,
   NivelEscolar,
-  Pago,
   TipoPago,
 } from "@/types/database";
 
-type ReportPayment = Pick<
-  Pago,
-  "id" | "monto" | "tipo_pago" | "fecha_pago"
-> & {
-  alumnos: Pick<Alumno, "nombre" | "nivel">;
+type StudentSummary = Pick<
+  Alumno,
+  | "id"
+  | "nombre"
+  | "nivel"
+  | "grado"
+  | "grupo"
+  | "deuda_mensualidad"
+  | "deuda_inscripcion"
+>;
+
+type FilterMetadata = Pick<Alumno, "nivel" | "grado" | "grupo">;
+
+type ReportRow = StudentSummary & {
+  totalPagado: number;
+  totalPendiente: number;
 };
 
 type PaymentFilter = TipoPago | "todos";
@@ -24,99 +34,181 @@ const currencyFormatter = new Intl.NumberFormat("es-MX", {
   currency: "MXN",
 });
 
-const dateFormatter = new Intl.DateTimeFormat("es-MX", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  timeZone: "America/Mexico_City",
-});
-
 const selectClass =
-  "rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-700 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
+  "mt-2 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-700 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
 
 function escapeCsv(value: string | number) {
-  const text = String(value);
-  return `"${text.replaceAll('"', '""')}"`;
+  return `"${String(value).replaceAll('"', '""')}"`;
 }
 
 export default function ReportsPage() {
-  const [payments, setPayments] = useState<ReportPayment[]>([]);
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [metadata, setMetadata] = useState<FilterMetadata[]>([]);
+  const [levelFilter, setLevelFilter] = useState<LevelFilter>("todos");
+  const [gradeFilter, setGradeFilter] = useState("todos");
+  const [groupFilter, setGroupFilter] = useState("todos");
   const [paymentFilter, setPaymentFilter] =
     useState<PaymentFilter>("todos");
-  const [levelFilter, setLevelFilter] = useState<LevelFilter>("todos");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
-    async function loadReport() {
-      try {
-        const supabase = getSupabaseBrowserClient();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 30);
+    async function loadFilterMetadata() {
+      const supabase = getSupabaseBrowserClient();
+      const { data, error: queryError } = await supabase
+        .from("alumnos")
+        .select("nivel, grado, grupo");
 
-        const { data, error: queryError } = await supabase
-          .from("pagos")
-          .select(
-            "id, monto, tipo_pago, fecha_pago, alumnos!inner(nombre, nivel)",
-          )
-          .gte("fecha_pago", startDate.toISOString())
-          .order("fecha_pago", { ascending: false });
-
-        if (queryError) throw queryError;
-        if (isMounted) setPayments(data);
-      } catch (caughtError) {
-        if (isMounted) {
-          setError(
-            caughtError instanceof Error
-              ? caughtError.message
-              : "No fue posible cargar el reporte financiero.",
-          );
-        }
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
+      if (!queryError && isMounted) setMetadata(data);
     }
 
-    void loadReport();
+    void loadFilterMetadata();
     return () => {
       isMounted = false;
     };
   }, []);
 
-  const filteredPayments = useMemo(
+  useEffect(() => {
+    let isCurrentRequest = true;
+
+    async function loadSummary() {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const supabase = getSupabaseBrowserClient();
+        let studentsQuery = supabase
+          .from("alumnos")
+          .select(
+            "id, nombre, nivel, grado, grupo, deuda_mensualidad, deuda_inscripcion",
+          )
+          .order("nombre");
+
+        if (levelFilter !== "todos") {
+          studentsQuery = studentsQuery.eq("nivel", levelFilter);
+        }
+        if (gradeFilter !== "todos") {
+          studentsQuery = studentsQuery.eq("grado", Number(gradeFilter));
+        }
+        if (groupFilter !== "todos") {
+          studentsQuery = studentsQuery.eq("grupo", groupFilter);
+        }
+
+        const { data: students, error: studentsError } =
+          await studentsQuery;
+
+        if (studentsError) throw studentsError;
+        if (students.length === 0) {
+          if (isCurrentRequest) setRows([]);
+          return;
+        }
+
+        let paymentsQuery = supabase
+          .from("pagos")
+          .select("alumno_id, monto")
+          .in(
+            "alumno_id",
+            students.map((student) => student.id),
+          );
+
+        if (paymentFilter !== "todos") {
+          paymentsQuery = paymentsQuery.eq("tipo_pago", paymentFilter);
+        }
+
+        const { data: payments, error: paymentsError } =
+          await paymentsQuery;
+
+        if (paymentsError) throw paymentsError;
+
+        const paidByStudent = new Map<string, number>();
+        payments.forEach((payment) => {
+          paidByStudent.set(
+            payment.alumno_id,
+            (paidByStudent.get(payment.alumno_id) ?? 0) + payment.monto,
+          );
+        });
+
+        const summary = students.map((student) => ({
+          ...student,
+          totalPagado: paidByStudent.get(student.id) ?? 0,
+          totalPendiente:
+            student.deuda_mensualidad + student.deuda_inscripcion,
+        }));
+
+        if (isCurrentRequest) setRows(summary);
+      } catch (caughtError) {
+        if (isCurrentRequest) {
+          setError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : "No fue posible generar el reporte financiero.",
+          );
+        }
+      } finally {
+        if (isCurrentRequest) setIsLoading(false);
+      }
+    }
+
+    void loadSummary();
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [gradeFilter, groupFilter, levelFilter, paymentFilter]);
+
+  const availableGrades = useMemo(
     () =>
-      payments.filter(
-        (payment) =>
-          (paymentFilter === "todos" ||
-            payment.tipo_pago === paymentFilter) &&
-          (levelFilter === "todos" ||
-            payment.alumnos.nivel === levelFilter),
-      ),
-    [levelFilter, paymentFilter, payments],
+      Array.from(
+        new Set(
+          metadata
+            .filter(
+              (item) =>
+                levelFilter === "todos" || item.nivel === levelFilter,
+            )
+            .map((item) => item.grado),
+        ),
+      ).sort((first, second) => first - second),
+    [levelFilter, metadata],
   );
 
-  const filteredTotal = filteredPayments.reduce(
-    (total, payment) => total + payment.monto,
+  const availableGroups = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          metadata
+            .filter(
+              (item) =>
+                (levelFilter === "todos" || item.nivel === levelFilter) &&
+                (gradeFilter === "todos" ||
+                  item.grado === Number(gradeFilter)),
+            )
+            .map((item) => item.grupo),
+        ),
+      ).sort((first, second) => first.localeCompare(second, "es")),
+    [gradeFilter, levelFilter, metadata],
+  );
+
+  const totalFiltered = rows.reduce(
+    (total, row) => total + row.totalPagado,
     0,
   );
 
   function exportCsv() {
-    if (filteredPayments.length === 0) return;
+    if (rows.length === 0) return;
 
-    const rows = [
-      ["Fecha de Pago", "Alumno", "Nivel", "Tipo de Pago", "Monto"],
-      ...filteredPayments.map((payment) => [
-        dateFormatter.format(new Date(payment.fecha_pago)),
-        payment.alumnos.nombre,
-        payment.alumnos.nivel,
-        payment.tipo_pago,
-        payment.monto.toFixed(2),
+    const data = [
+      ["Nombre", "Nivel", "Grado", "Grupo", "Total Pagado", "Total Pendiente"],
+      ...rows.map((row) => [
+        row.nombre,
+        row.nivel,
+        row.grado,
+        row.grupo,
+        row.totalPagado.toFixed(2),
+        row.totalPendiente.toFixed(2),
       ]),
     ];
-
-    const csv = rows
+    const csv = data
       .map((row) => row.map((value) => escapeCsv(value)).join(","))
       .join("\r\n");
     const blob = new Blob(["\uFEFF", csv], {
@@ -125,7 +217,7 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `reporte-pagos-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.download = `resumen-financiero-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -139,54 +231,33 @@ export default function ReportsPage() {
             Reportes financieros
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            Pagos registrados durante los últimos 30 días.
+            Resumen acumulado de pagos y adeudos por alumno.
           </p>
         </div>
         <button
           type="button"
           onClick={exportCsv}
-          disabled={isLoading || filteredPayments.length === 0}
+          disabled={isLoading || rows.length === 0}
           className="rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           Exportar a CSV
         </button>
       </div>
 
-      <div className="mt-8 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-end">
+      <div className="mt-8 grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2 lg:grid-cols-5">
         <div>
-          <label
-            htmlFor="paymentFilter"
-            className="block text-xs font-semibold uppercase tracking-wider text-slate-500"
-          >
-            Tipo de pago
+          <label htmlFor="reportLevel" className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Nivel
           </label>
           <select
-            id="paymentFilter"
-            value={paymentFilter}
-            onChange={(event) =>
-              setPaymentFilter(event.target.value as PaymentFilter)
-            }
-            className={`mt-2 ${selectClass}`}
-          >
-            <option value="todos">Todos</option>
-            <option value="inscripcion">Inscripción</option>
-            <option value="mensualidad">Mensualidad</option>
-          </select>
-        </div>
-        <div>
-          <label
-            htmlFor="levelFilter"
-            className="block text-xs font-semibold uppercase tracking-wider text-slate-500"
-          >
-            Nivel escolar
-          </label>
-          <select
-            id="levelFilter"
+            id="reportLevel"
             value={levelFilter}
-            onChange={(event) =>
-              setLevelFilter(event.target.value as LevelFilter)
-            }
-            className={`mt-2 ${selectClass}`}
+            onChange={(event) => {
+              setLevelFilter(event.target.value as LevelFilter);
+              setGradeFilter("todos");
+              setGroupFilter("todos");
+            }}
+            className={selectClass}
           >
             <option value="todos">Todos</option>
             <option value="primaria">Primaria</option>
@@ -194,21 +265,74 @@ export default function ReportsPage() {
             <option value="bachillerato">Bachillerato</option>
           </select>
         </div>
-        <div className="sm:ml-auto sm:text-right">
+        <div>
+          <label htmlFor="reportGrade" className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Grado
+          </label>
+          <select
+            id="reportGrade"
+            value={gradeFilter}
+            onChange={(event) => {
+              setGradeFilter(event.target.value);
+              setGroupFilter("todos");
+            }}
+            className={selectClass}
+          >
+            <option value="todos">Todos</option>
+            {availableGrades.map((grade) => (
+              <option key={grade} value={grade}>
+                {grade}°
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="reportGroup" className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Grupo
+          </label>
+          <select
+            id="reportGroup"
+            value={groupFilter}
+            onChange={(event) => setGroupFilter(event.target.value)}
+            className={selectClass}
+          >
+            <option value="todos">Todos</option>
+            {availableGroups.map((group) => (
+              <option key={group} value={group}>
+                {group}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="reportPaymentType" className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Tipo de pago
+          </label>
+          <select
+            id="reportPaymentType"
+            value={paymentFilter}
+            onChange={(event) =>
+              setPaymentFilter(event.target.value as PaymentFilter)
+            }
+            className={selectClass}
+          >
+            <option value="todos">Todos</option>
+            <option value="inscripcion">Inscripción</option>
+            <option value="mensualidad">Mensualidad</option>
+          </select>
+        </div>
+        <div className="lg:text-right">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Total filtrado
           </p>
           <p className="mt-2 text-xl font-bold tabular-nums text-slate-950">
-            {currencyFormatter.format(filteredTotal)}
+            {currencyFormatter.format(totalFiltered)}
           </p>
         </div>
       </div>
 
       {error && (
-        <p
-          role="alert"
-          className="mt-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700"
-        >
+        <p role="alert" className="mt-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </p>
       )}
@@ -218,56 +342,50 @@ export default function ReportsPage() {
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
-                {["Fecha", "Alumno", "Nivel", "Tipo de Pago"].map((heading) => (
-                  <th
-                    key={heading}
-                    scope="col"
-                    className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-600"
-                  >
-                    {heading}
-                  </th>
-                ))}
-                <th
-                  scope="col"
-                  className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-slate-600"
-                >
-                  Monto
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Nombre
+                </th>
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Nivel / Grado / Grupo
+                </th>
+                <th scope="col" className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Total Pagado
+                </th>
+                <th scope="col" className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Total Pendiente
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-500">
-                    Cargando reporte...
+                  <td colSpan={4} className="px-6 py-12 text-center text-sm text-slate-500">
+                    Generando resumen...
                   </td>
                 </tr>
               )}
-              {!isLoading && !error && filteredPayments.length === 0 && (
+              {!isLoading && !error && rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-500">
-                    No hay pagos que coincidan con los filtros seleccionados.
+                  <td colSpan={4} className="px-6 py-12 text-center text-sm text-slate-500">
+                    No hay alumnos que coincidan con los filtros.
                   </td>
                 </tr>
               )}
               {!isLoading &&
                 !error &&
-                filteredPayments.map((payment) => (
-                  <tr key={payment.id} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600">
-                      {dateFormatter.format(new Date(payment.fecha_pago))}
-                    </td>
+                rows.map((row) => (
+                  <tr key={row.id} className="hover:bg-slate-50">
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-slate-900">
-                      {payment.alumnos.nombre}
+                      {row.nombre}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm capitalize text-slate-600">
-                      {payment.alumnos.nivel}
+                      {row.nivel} · {row.grado}° · Grupo {row.grupo}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm font-medium capitalize text-slate-700">
-                      {payment.tipo_pago}
+                    <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-semibold tabular-nums text-emerald-700">
+                      {currencyFormatter.format(row.totalPagado)}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-semibold tabular-nums text-slate-900">
-                      {currencyFormatter.format(payment.monto)}
+                    <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-semibold tabular-nums text-amber-800">
+                      {currencyFormatter.format(row.totalPendiente)}
                     </td>
                   </tr>
                 ))}
