@@ -3,34 +3,48 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { validateMockCredentials } from "@/lib/auth";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 const fieldClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setIsSubmitting(true);
 
-    const user = validateMockCredentials(username, password);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data, error: signInError } =
+        await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password,
+        });
 
-    if (!user) {
-      setError("Usuario o contraseña incorrectos.");
+      if (signInError) throw signInError;
+
+      const role = data.user.app_metadata.role;
+      const destination =
+        role === "admin" ? "/dashboard/admin" : "/dashboard/alumno";
+
+      router.replace(destination);
+    } catch (caughtError) {
+      console.error("Error al iniciar sesión:", caughtError);
+      setError(
+        caughtError instanceof Error &&
+          caughtError.message.includes("NEXT_PUBLIC_SUPABASE")
+          ? caughtError.message
+          : "Correo electrónico o contraseña incorrectos.",
+      );
       setIsSubmitting(false);
-      return;
     }
-
-    router.replace(
-      user.role === "admin" ? "/dashboard/admin" : "/dashboard/alumno",
-    );
   }
 
   return (
@@ -43,29 +57,35 @@ export default function LoginPage() {
           Iniciar sesión
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          Ingresa tus credenciales para acceder a tu cuenta.
+          Ingresa el correo y la contraseña registrados en Supabase.
         </p>
 
         <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
           <div>
-            <label htmlFor="username" className="mb-2 block text-sm font-medium text-slate-700">
-              Usuario
+            <label
+              htmlFor="email"
+              className="mb-2 block text-sm font-medium text-slate-700"
+            >
+              Correo electrónico
             </label>
             <input
-              id="username"
-              name="username"
-              type="text"
-              autoComplete="username"
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
               required
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              placeholder="admin o alumno"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="nombre@escuela.com"
               className={fieldClass}
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-2 block text-sm font-medium text-slate-700">
+            <label
+              htmlFor="password"
+              className="mb-2 block text-sm font-medium text-slate-700"
+            >
               Contraseña
             </label>
             <input
@@ -82,7 +102,10 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <p role="alert" className="rounded-lg bg-red-50 px-3.5 py-3 text-sm text-red-700">
+            <p
+              role="alert"
+              className="rounded-lg bg-red-50 px-3.5 py-3 text-sm text-red-700"
+            >
               {error}
             </p>
           )}

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type { UserRole } from "@/types/user";
 
 interface SidebarProps {
@@ -19,7 +21,24 @@ const linksByRole: Record<UserRole, Array<{ label: string; href: string }>> = {
 };
 
 export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    setIsSigningOut(true);
+    const supabase = getSupabaseBrowserClient();
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.error("No fue posible cerrar la sesión:", error);
+      setIsSigningOut(false);
+      return;
+    }
+
+    router.replace("/login");
+    router.refresh();
+  }
 
   return (
     <>
@@ -35,7 +54,20 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
         <nav className="flex-1 space-y-1" aria-label="Navegación principal">
           {linksByRole[role].map((link) => <Link key={link.href} href={link.href} onClick={() => setIsOpen(false)} className="block rounded-lg px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white">{link.label}</Link>)}
         </nav>
-        <div className="border-t border-slate-800 px-3 pt-4"><p className="truncate text-sm font-medium">{userName}</p><p className="mt-1 text-xs text-slate-400">{role === "admin" ? "Administrador" : "Alumno"}</p></div>
+        <div className="border-t border-slate-800 px-3 pt-4">
+          <p className="truncate text-sm font-medium">{userName}</p>
+          <p className="mt-1 text-xs text-slate-400">
+            {role === "admin" ? "Administrador" : "Alumno"}
+          </p>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={isSigningOut}
+            className="mt-4 w-full rounded-lg border border-slate-700 px-3 py-2 text-left text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSigningOut ? "Cerrando sesión..." : "Cerrar sesión"}
+          </button>
+        </div>
       </aside>
     </>
   );
