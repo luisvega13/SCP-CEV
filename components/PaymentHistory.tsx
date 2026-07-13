@@ -53,6 +53,12 @@ export function PaymentHistory({
                 </th>
                 <th
                   scope="col"
+                  className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-600"
+                >
+                  Periodo
+                </th>
+                <th
+                  scope="col"
                   className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-slate-600"
                 >
                   Monto
@@ -63,7 +69,7 @@ export function PaymentHistory({
               {isLoading && (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="px-6 py-10 text-center text-sm text-slate-500"
                   >
                     Cargando historial de pagos...
@@ -74,7 +80,7 @@ export function PaymentHistory({
               {!isLoading && error && (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="px-6 py-10 text-center text-sm text-red-600"
                   >
                     {error}
@@ -85,7 +91,7 @@ export function PaymentHistory({
               {!isLoading && !error && payments.length === 0 && (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="px-6 py-10 text-center text-sm text-slate-500"
                   >
                     No se han registrado pagos para este alumno.
@@ -105,6 +111,9 @@ export function PaymentHistory({
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-medium capitalize text-slate-900">
                       {payment.tipo_pago}
+                    </td>
+                    <td className="whitespace-nowrap px-6 py-4 text-sm capitalize text-slate-600">
+                      {payment.mes} {payment.anio}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-semibold tabular-nums text-slate-900">
                       {currencyFormatter.format(payment.monto)}

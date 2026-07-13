@@ -2,10 +2,25 @@ export type NivelEscolar = "primaria" | "secundaria" | "bachillerato";
 export type EstadoAlumno = "activo" | "baja";
 export type SexoAlumno = "hombre" | "mujer";
 export type TipoPago = "inscripcion" | "mensualidad";
+export type MesPago =
+  | "enero"
+  | "febrero"
+  | "marzo"
+  | "abril"
+  | "mayo"
+  | "junio"
+  | "julio"
+  | "agosto"
+  | "septiembre"
+  | "octubre"
+  | "noviembre"
+  | "diciembre";
 
 export type Alumno = {
   id: string;
   nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string;
   matricula: string | null;
   nivel: NivelEscolar;
   grado: number;
@@ -35,6 +50,8 @@ export type Pago = {
   monto: number;
   tipo_pago: TipoPago;
   fecha_pago: string;
+  mes: MesPago;
+  anio: number;
 };
 
 export type PagoInsert = Omit<Pago, "id" | "fecha_pago"> & {
@@ -42,6 +59,18 @@ export type PagoInsert = Omit<Pago, "id" | "fecha_pago"> & {
   fecha_pago?: string;
 };
 export type PagoUpdate = Partial<PagoInsert>;
+
+export type ConfiguracionCostos = {
+  nivel: NivelEscolar;
+  costo_inscripcion: number;
+  costo_mensualidad: number;
+  ciclo_escolar: string;
+};
+
+export type ConfiguracionCostosInsert = ConfiguracionCostos;
+export type ConfiguracionCostosUpdate = Partial<
+  Pick<ConfiguracionCostos, "costo_inscripcion" | "costo_mensualidad">
+>;
 
 export type Database = {
   public: {
@@ -66,14 +95,31 @@ export type Database = {
           },
         ];
       };
+      configuracion_costos: {
+        Row: ConfiguracionCostos;
+        Insert: ConfiguracionCostosInsert;
+        Update: ConfiguracionCostosUpdate;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      actualizar_configuracion_costos: {
+        Args: {
+          p_nivel: NivelEscolar;
+          p_costo_inscripcion: number;
+          p_costo_mensualidad: number;
+          p_ciclo_escolar: string;
+        };
+        Returns: ConfiguracionCostos;
+      };
+    };
     Enums: {
       nivel_escolar: NivelEscolar;
       estado_alumno: EstadoAlumno;
       sexo_alumno: SexoAlumno;
       tipo_pago: TipoPago;
+      mes_pago: MesPago;
     };
     CompositeTypes: Record<string, never>;
   };

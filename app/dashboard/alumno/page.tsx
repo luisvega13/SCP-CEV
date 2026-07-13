@@ -2,8 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { PaymentHistory } from "@/components/PaymentHistory";
+import {
+  ACADEMIC_MONTHS,
+  getAcademicMonthYear,
+  getCurrentAcademicCycle,
+  getFullStudentName,
+} from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-import type { Alumno, Pago } from "@/types/database";
+import type {
+  Alumno,
+  ConfiguracionCostos,
+  Pago,
+} from "@/types/database";
 
 const currencyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
@@ -17,6 +27,9 @@ export default function StudentDashboardPage() {
   const [payments, setPayments] = useState<Pago[]>([]);
   const [isPaymentsLoading, setIsPaymentsLoading] = useState(true);
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
+  const [configuration, setConfiguration] =
+    useState<ConfiguracionCostos | null>(null);
+  const [cycle] = useState(getCurrentAcademicCycle);
 
   useEffect(() => {
     let isMounted = true;
@@ -51,14 +64,26 @@ export default function StudentDashboardPage() {
         }
 
         try {
-          const { data: paymentData, error: paymentsQueryError } = await supabase
-            .from("pagos")
-            .select("*")
-            .eq("alumno_id", data.id)
-            .order("fecha_pago", { ascending: false });
+          const [paymentsResult, configurationResult] = await Promise.all([
+            supabase
+              .from("pagos")
+              .select("*")
+              .eq("alumno_id", data.id)
+              .order("fecha_pago", { ascending: false }),
+            supabase
+              .from("configuracion_costos")
+              .select("*")
+              .eq("nivel", data.nivel)
+              .eq("ciclo_escolar", cycle)
+              .maybeSingle(),
+          ]);
 
-          if (paymentsQueryError) throw paymentsQueryError;
-          if (isMounted) setPayments(paymentData);
+          if (paymentsResult.error) throw paymentsResult.error;
+          if (configurationResult.error) throw configurationResult.error;
+          if (isMounted) {
+            setPayments(paymentsResult.data);
+            setConfiguration(configurationResult.data);
+          }
         } catch (paymentsCaughtError) {
           if (isMounted) {
             setPaymentsError(
@@ -89,7 +114,7 @@ export default function StudentDashboardPage() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [cycle]);
 
   if (isLoading) {
     return (
@@ -117,6 +142,26 @@ export default function StudentDashboardPage() {
 
   const totalDebt =
     student.deuda_mensualidad + student.deuda_inscripcion;
+  const monthlyStatuses = ACADEMIC_MONTHS.map((month) => {
+    const year = getAcademicMonthYear(month.value, cycle);
+    const paidAmount = payments
+      .filter(
+        (payment) =>
+          payment.tipo_pago === "mensualidad" &&
+          payment.mes === month.value &&
+          payment.anio === year,
+      )
+      .reduce((total, payment) => total + payment.monto, 0);
+
+    return {
+      ...month,
+      year,
+      paidAmount,
+      isPaid:
+        configuration !== null &&
+        paidAmount >= configuration.costo_mensualidad,
+    };
+  });
 
   return (
     <section className="mx-auto max-w-5xl">
@@ -124,7 +169,7 @@ export default function StudentDashboardPage() {
         <p className="text-sm font-medium text-sky-600">Mi cuenta</p>
         <div className="mt-1 flex flex-wrap items-center gap-3">
           <h1 className="text-3xl font-bold text-slate-950">
-            {student.nombre}
+            {getFullStudentName(student)}
           </h1>
           <span
             className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${
@@ -151,7 +196,7 @@ export default function StudentDashboardPage() {
               Nombre
             </dt>
             <dd className="mt-2 text-sm font-medium text-slate-900">
-              {student.nombre}
+              {getFullStudentName(student)}
             </dd>
           </div>
           <div>
@@ -210,14 +255,6 @@ export default function StudentDashboardPage() {
         </div>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <article className="rounded-xl border border-amber-200 bg-amber-50 p-6">
-            <p className="text-sm font-medium text-amber-800">
-              Deuda de mensualidad
-            </p>
-            <p className="mt-2 text-3xl font-bold tabular-nums text-amber-950">
-              {currencyFormatter.format(student.deuda_mensualidad)}
-            </p>
-          </article>
           <article className="rounded-xl border border-violet-200 bg-violet-50 p-6">
             <p className="text-sm font-medium text-violet-800">
               Deuda de inscripción
@@ -226,8 +263,61 @@ export default function StudentDashboardPage() {
               {currencyFormatter.format(student.deuda_inscripcion)}
             </p>
           </article>
+          <article className="rounded-xl border border-sky-200 bg-sky-50 p-6">
+            <p className="text-sm font-medium text-sky-800">
+              Ciclo escolar
+            </p>
+            <p className="mt-2 text-3xl font-bold text-sky-950">{cycle}</p>
+            <p className="mt-2 text-xs text-sky-700">
+              {configuration
+                ? `Mensualidad: ${currencyFormatter.format(configuration.costo_mensualidad)}`
+                : "Costos pendientes de configuración"}
+            </p>
+          </article>
         </div>
       </div>
+
+      <section className="mt-8">
+        <h2 className="text-xl font-semibold text-slate-950">
+          Mensualidades del ciclo
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Agosto a julio · saldo pendiente:{" "}
+          {currencyFormatter.format(student.deuda_mensualidad)}
+        </p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {monthlyStatuses.map((month) => (
+            <article
+              key={month.value}
+              className={`rounded-xl border p-4 ${
+                month.isPaid
+                  ? "border-emerald-200 bg-emerald-50"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-950">
+                    {month.label} {month.year}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Abonado: {currencyFormatter.format(month.paidAmount)}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-2 py-1 text-xs font-medium ${
+                    month.isPaid
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {month.isPaid ? "Pagado" : "Pendiente"}
+                </span>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <PaymentHistory
         payments={payments}

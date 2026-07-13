@@ -50,6 +50,8 @@ function createIsolatedSignUpClient() {
 
 export default function NewStudentPage() {
   const [nombre, setNombre] = useState("");
+  const [apellidoPaterno, setApellidoPaterno] = useState("");
+  const [apellidoMaterno, setApellidoMaterno] = useState("");
   const [matricula, setMatricula] = useState("");
   const [nivel, setNivel] = useState<NivelEscolar>("primaria");
   const [grado, setGrado] = useState("1");
@@ -66,12 +68,20 @@ export default function NewStudentPage() {
     setCreatedCredentials(null);
 
     const normalizedName = nombre.trim().replace(/\s+/g, " ");
+    const normalizedPaternalSurname = apellidoPaterno
+      .trim()
+      .replace(/\s+/g, " ");
+    const normalizedMaternalSurname = apellidoMaterno
+      .trim()
+      .replace(/\s+/g, " ");
     const normalizedEnrollment = matricula.trim().toUpperCase();
     const normalizedGroup = grupo.trim().toUpperCase();
     const firstName = normalizedName.split(" ")[0] ?? "";
 
-    if (firstName.length < 2) {
-      setError("El primer nombre debe contener al menos dos letras.");
+    if (firstName.length < 2 || !normalizedPaternalSurname) {
+      setError(
+        "El nombre y el apellido paterno son obligatorios; el primer nombre debe tener al menos dos letras.",
+      );
       return;
     }
 
@@ -115,6 +125,8 @@ export default function NewStudentPage() {
           options: {
             data: {
               nombre: normalizedName,
+              apellido_paterno: normalizedPaternalSurname,
+              apellido_materno: normalizedMaternalSurname,
               matricula: normalizedEnrollment,
             },
           },
@@ -127,6 +139,8 @@ export default function NewStudentPage() {
 
       const newStudent: AlumnoInsert = {
         nombre: normalizedName,
+        apellido_paterno: normalizedPaternalSurname,
+        apellido_materno: normalizedMaternalSurname,
         matricula: normalizedEnrollment,
         nivel,
         grado: Number(grado),
@@ -142,11 +156,19 @@ export default function NewStudentPage() {
       if (insertError) throw insertError;
 
       setCreatedCredentials({
-        nombre: normalizedName,
+        nombre: [
+          normalizedName,
+          normalizedPaternalSurname,
+          normalizedMaternalSurname,
+        ]
+          .filter(Boolean)
+          .join(" "),
         email,
         password: temporaryPassword,
       });
       setNombre("");
+      setApellidoPaterno("");
+      setApellidoMaterno("");
       setMatricula("");
       setNivel("primaria");
       setGrado("1");
@@ -217,7 +239,7 @@ export default function NewStudentPage() {
       >
         <div className="sm:col-span-2">
           <label htmlFor="nombre" className="text-sm font-medium text-slate-700">
-            Nombre completo
+            Nombre(s)
           </label>
           <input
             id="nombre"
@@ -227,6 +249,41 @@ export default function NewStudentPage() {
             value={nombre}
             onChange={(event) => setNombre(event.target.value)}
             placeholder="Luis Antonio"
+            className={fieldClass}
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor="apellidoPaterno"
+            className="text-sm font-medium text-slate-700"
+          >
+            Apellido paterno
+          </label>
+          <input
+            id="apellidoPaterno"
+            type="text"
+            required
+            value={apellidoPaterno}
+            onChange={(event) => setApellidoPaterno(event.target.value)}
+            placeholder="García"
+            className={fieldClass}
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor="apellidoMaterno"
+            className="text-sm font-medium text-slate-700"
+          >
+            Apellido materno
+          </label>
+          <input
+            id="apellidoMaterno"
+            type="text"
+            value={apellidoMaterno}
+            onChange={(event) => setApellidoMaterno(event.target.value)}
+            placeholder="López"
             className={fieldClass}
           />
         </div>

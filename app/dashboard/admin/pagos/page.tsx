@@ -2,14 +2,22 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { getFullStudentName } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type { Alumno, Pago } from "@/types/database";
 
 type RecentPayment = Pick<
   Pago,
-  "id" | "monto" | "tipo_pago" | "fecha_pago"
+  "id" | "monto" | "tipo_pago" | "fecha_pago" | "mes" | "anio"
 > & {
-  alumnos: Pick<Alumno, "id" | "nombre" | "matricula">;
+  alumnos: Pick<
+    Alumno,
+    | "id"
+    | "nombre"
+    | "apellido_paterno"
+    | "apellido_materno"
+    | "matricula"
+  >;
 };
 
 const currencyFormatter = new Intl.NumberFormat("es-MX", {
@@ -37,7 +45,7 @@ export default function PaymentsPage() {
         const { data, error: queryError } = await supabase
           .from("pagos")
           .select(
-            "id, monto, tipo_pago, fecha_pago, alumnos!inner(id, nombre, matricula)",
+            "id, monto, tipo_pago, fecha_pago, mes, anio, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, matricula)",
           )
           .order("fecha_pago", { ascending: false })
           .limit(20);
@@ -90,7 +98,7 @@ export default function PaymentsPage() {
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
-                {["Fecha y hora", "Alumno", "Matrícula", "Tipo"].map(
+                {["Fecha y hora", "Alumno", "Matrícula", "Tipo", "Periodo"].map(
                   (heading) => (
                     <th
                       key={heading}
@@ -116,7 +124,7 @@ export default function PaymentsPage() {
               {isLoading && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-6 py-12 text-center text-sm text-slate-500"
                   >
                     Cargando movimientos...
@@ -126,7 +134,7 @@ export default function PaymentsPage() {
               {!isLoading && !error && payments.length === 0 && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-6 py-12 text-center text-sm text-slate-500"
                   >
                     Todavía no se han registrado pagos.
@@ -141,13 +149,16 @@ export default function PaymentsPage() {
                       {dateFormatter.format(new Date(payment.fecha_pago))}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-slate-900">
-                      {payment.alumnos.nombre}
+                      {getFullStudentName(payment.alumnos)}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 font-mono text-sm text-slate-600">
                       {payment.alumnos.matricula ?? "Sin asignar"}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-medium capitalize text-slate-700">
                       {payment.tipo_pago}
+                    </td>
+                    <td className="whitespace-nowrap px-6 py-4 text-sm capitalize text-slate-600">
+                      {payment.mes} {payment.anio}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-semibold tabular-nums text-slate-900">
                       {currencyFormatter.format(payment.monto)}

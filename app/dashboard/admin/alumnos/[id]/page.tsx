@@ -5,10 +5,18 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { PaymentHistory } from "@/components/PaymentHistory";
+import {
+  ACADEMIC_MONTHS,
+  getAcademicMonthYear,
+  getCurrentAcademicCycle,
+  getFullStudentName,
+} from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-import type { Alumno, Pago } from "@/types/database";
-
-type PaymentType = "inscripcion" | "mensualidad";
+import type {
+  Alumno,
+  ConfiguracionCostos,
+  Pago,
+} from "@/types/database";
 
 const currencyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
@@ -18,6 +26,19 @@ const currencyFormatter = new Intl.NumberFormat("es-MX", {
 const fieldClass =
   "mt-2 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
 
+function getErrorMessage(caughtError: unknown, fallback: string) {
+  if (
+    caughtError &&
+    typeof caughtError === "object" &&
+    "message" in caughtError &&
+    typeof caughtError.message === "string"
+  ) {
+    return caughtError.message;
+  }
+
+  return fallback;
+}
+
 export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
   const studentId = params.id;
@@ -25,8 +46,10 @@ export default function StudentDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
-  const [paymentType, setPaymentType] =
-    useState<PaymentType>("mensualidad");
+  const [cycle, setCycle] = useState(getCurrentAcademicCycle);
+  const [configuration, setConfiguration] =
+    useState<ConfiguracionCostos | null>(null);
+  const [configurationError, setConfigurationError] = useState("");
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -35,6 +58,8 @@ export default function StudentDetailPage() {
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState("");
+  const [editPaternalSurname, setEditPaternalSurname] = useState("");
+  const [editMaternalSurname, setEditMaternalSurname] = useState("");
   const [editLevel, setEditLevel] = useState<Alumno["nivel"]>("primaria");
   const [editGrade, setEditGrade] = useState("1");
   const [editGroup, setEditGroup] = useState("");
@@ -61,6 +86,8 @@ export default function StudentDetailPage() {
           setStudent(data);
           if (data) {
             setEditName(data.nombre);
+            setEditPaternalSurname(data.apellido_paterno);
+            setEditMaternalSurname(data.apellido_materno);
             setEditLevel(data.nivel);
             setEditGrade(String(data.grado));
             setEditGroup(data.grupo);
@@ -112,9 +139,47 @@ export default function StudentDetailPage() {
     };
   }, [studentId]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadConfiguration() {
+      if (!student) return;
+
+      const supabase = getSupabaseBrowserClient();
+      const { data, error: queryError } = await supabase
+        .from("configuracion_costos")
+        .select("*")
+        .eq("nivel", student.nivel)
+        .eq("ciclo_escolar", cycle)
+        .maybeSingle();
+
+      if (!isMounted) return;
+
+      if (queryError) {
+        setConfigurationError(queryError.message);
+        setConfiguration(null);
+      } else if (!data) {
+        setConfigurationError(
+          `No hay costos configurados para ${student.nivel} en ${cycle}.`,
+        );
+        setConfiguration(null);
+      } else {
+        setConfiguration(data);
+        setConfigurationError("");
+      }
+    }
+
+    void loadConfiguration();
+    return () => {
+      isMounted = false;
+    };
+  }, [cycle, student]);
+
   function beginEditing() {
     if (!student) return;
     setEditName(student.nombre);
+    setEditPaternalSurname(student.apellido_paterno);
+    setEditMaternalSurname(student.apellido_materno);
     setEditLevel(student.nivel);
     setEditGrade(String(student.grado));
     setEditGroup(student.grupo);
@@ -126,6 +191,12 @@ export default function StudentDetailPage() {
   async function handleUpdate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedName = editName.trim().replace(/\s+/g, " ");
+    const normalizedPaternalSurname = editPaternalSurname
+      .trim()
+      .replace(/\s+/g, " ");
+    const normalizedMaternalSurname = editMaternalSurname
+      .trim()
+      .replace(/\s+/g, " ");
     const normalizedGroup = editGroup.trim().toUpperCase();
     const numericGrade = Number(editGrade);
     const maximumGrade = editLevel === "primaria" ? 6 : 3;
@@ -133,8 +204,10 @@ export default function StudentDetailPage() {
     setProfileError("");
     setProfileMessage("");
 
-    if (!normalizedName || !normalizedGroup) {
-      setProfileError("Nombre y grupo son campos obligatorios.");
+    if (!normalizedName || !normalizedPaternalSurname || !normalizedGroup) {
+      setProfileError(
+        "Nombre, apellido paterno y grupo son campos obligatorios.",
+      );
       return;
     }
 
@@ -155,6 +228,8 @@ export default function StudentDetailPage() {
         .from("alumnos")
         .update({
           nombre: normalizedName,
+          apellido_paterno: normalizedPaternalSurname,
+          apellido_materno: normalizedMaternalSurname,
           nivel: editLevel,
           grado: numericGrade,
           grupo: normalizedGroup,
@@ -222,8 +297,25 @@ export default function StudentDetailPage() {
     const numericAmount = Number(amount);
     setSuccessMessage("");
 
+    if (!configuration) {
+      setFormError("Configura los costos del nivel y ciclo antes de registrar pagos.");
+      return;
+    }
+
+    if (!activePaymentType || !activeMonth || !activeYear) {
+      setFormError("El ciclo escolar ya se encuentra liquidado.");
+      return;
+    }
+
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       setFormError("Ingresa un monto mayor a cero.");
+      return;
+    }
+
+    if (numericAmount > activePendingAmount) {
+      setFormError(
+        `El monto no puede superar el saldo pendiente de ${currencyFormatter.format(activePendingAmount)}.`,
+      );
       return;
     }
 
@@ -236,7 +328,9 @@ export default function StudentDetailPage() {
       const { error: insertError } = await supabase.from("pagos").insert({
         alumno_id: studentId,
         monto: numericAmount,
-        tipo_pago: paymentType,
+        tipo_pago: activePaymentType,
+        mes: activeMonth,
+        anio: activeYear,
       });
 
       if (insertError) throw insertError;
@@ -271,9 +365,7 @@ export default function StudentDetailPage() {
       setSuccessMessage("El pago se registró correctamente.");
     } catch (caughtError) {
       setFormError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "No fue posible registrar el pago.",
+        getErrorMessage(caughtError, "No fue posible registrar el pago."),
       );
     } finally {
       setIsSaving(false);
@@ -297,6 +389,54 @@ export default function StudentDetailPage() {
     );
   }
 
+  const monthlyStatuses = ACADEMIC_MONTHS.map((academicMonth) => {
+    const year = getAcademicMonthYear(academicMonth.value, cycle);
+    const paidAmount = payments
+      .filter(
+        (payment) =>
+          payment.tipo_pago === "mensualidad" &&
+          payment.mes === academicMonth.value &&
+          payment.anio === year,
+      )
+      .reduce((total, payment) => total + payment.monto, 0);
+
+    return {
+      ...academicMonth,
+      year,
+      paidAmount,
+      isPaid:
+        configuration !== null &&
+        paidAmount >= configuration.costo_mensualidad,
+    };
+  });
+  const nextPendingMonth = monthlyStatuses.find((month) => !month.isPaid);
+  const isEnrollmentPending = student.deuda_inscripcion > 0;
+  const activePaymentType = isEnrollmentPending
+    ? ("inscripcion" as const)
+    : nextPendingMonth
+      ? ("mensualidad" as const)
+      : null;
+  const activeMonth = isEnrollmentPending
+    ? ("agosto" as const)
+    : nextPendingMonth?.value ?? null;
+  const activeYear = activeMonth
+    ? getAcademicMonthYear(activeMonth, cycle)
+    : null;
+  const activeCost = configuration
+    ? isEnrollmentPending
+      ? configuration.costo_inscripcion
+      : configuration.costo_mensualidad
+    : 0;
+  const activePaidAmount = isEnrollmentPending
+    ? Math.max(activeCost - student.deuda_inscripcion, 0)
+    : nextPendingMonth?.paidAmount ?? activeCost;
+  const activePendingAmount = Math.max(activeCost - activePaidAmount, 0);
+  const activeConceptLabel = isEnrollmentPending
+    ? `Inscripción agosto ${activeYear ?? ""}`
+    : nextPendingMonth
+      ? `Mensualidad ${nextPendingMonth.label} ${nextPendingMonth.year}`
+      : "Ciclo escolar liquidado";
+
   return (
     <section className="mx-auto max-w-5xl">
       <Link href="/dashboard/admin/alumnos" className="text-sm font-medium text-sky-600 hover:text-sky-800">
@@ -308,7 +448,7 @@ export default function StudentDetailPage() {
           <p className="text-sm font-medium text-sky-600">Detalle del alumno</p>
           <div className="mt-1 flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-bold text-slate-950">
-              {student.nombre}
+              {getFullStudentName(student)}
             </h1>
             <span
               className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${
@@ -378,7 +518,7 @@ export default function StudentDetailPage() {
         >
           <div className="sm:col-span-2">
             <label htmlFor="editName" className="text-sm font-medium text-slate-700">
-              Nombre completo
+              Nombre(s)
             </label>
             <input
               id="editName"
@@ -386,6 +526,41 @@ export default function StudentDetailPage() {
               required
               value={editName}
               onChange={(event) => setEditName(event.target.value)}
+              className={fieldClass}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="editPaternalSurname"
+              className="text-sm font-medium text-slate-700"
+            >
+              Apellido paterno
+            </label>
+            <input
+              id="editPaternalSurname"
+              type="text"
+              required
+              value={editPaternalSurname}
+              onChange={(event) =>
+                setEditPaternalSurname(event.target.value)
+              }
+              className={fieldClass}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="editMaternalSurname"
+              className="text-sm font-medium text-slate-700"
+            >
+              Apellido materno
+            </label>
+            <input
+              id="editMaternalSurname"
+              type="text"
+              value={editMaternalSurname}
+              onChange={(event) =>
+                setEditMaternalSurname(event.target.value)
+              }
               className={fieldClass}
             />
           </div>
@@ -465,16 +640,48 @@ export default function StudentDetailPage() {
       )}
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
-        <article className="rounded-xl border border-amber-200 bg-amber-50 p-6">
-          <p className="text-sm font-medium text-amber-800">Deuda de mensualidad</p>
-          <p className="mt-2 text-3xl font-bold tabular-nums text-amber-950">
-            {currencyFormatter.format(student.deuda_mensualidad)}
-          </p>
-        </article>
         <article className="rounded-xl border border-violet-200 bg-violet-50 p-6">
-          <p className="text-sm font-medium text-violet-800">Deuda de inscripción</p>
-          <p className="mt-2 text-3xl font-bold tabular-nums text-violet-950">
-            {currencyFormatter.format(student.deuda_inscripcion)}
+          <p className="text-sm font-medium text-violet-800">
+            {activeConceptLabel}
+          </p>
+          {configuration ? (
+            <>
+              <p className="mt-2 text-3xl font-bold tabular-nums text-violet-950">
+                {currencyFormatter.format(activeCost)}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-violet-800">
+                <p>
+                  Abonado:{" "}
+                  <span className="font-semibold">
+                    {currencyFormatter.format(activePaidAmount)}
+                  </span>
+                </p>
+                <p>
+                  Pendiente:{" "}
+                  <span className="font-semibold">
+                    {currencyFormatter.format(activePendingAmount)}
+                  </span>
+                </p>
+              </div>
+            </>
+          ) : (
+            <p className="mt-3 text-sm text-violet-800">
+              Configura los costos para mostrar el concepto actual.
+            </p>
+          )}
+        </article>
+        <article className="rounded-xl border border-sky-200 bg-sky-50 p-6">
+          <p className="text-sm font-medium text-sky-800">Ciclo escolar</p>
+          <input
+            value={cycle}
+            onChange={(event) => setCycle(event.target.value)}
+            aria-label="Ciclo escolar"
+            className="mt-2 w-36 rounded-lg border border-sky-200 bg-white px-3 py-2 text-lg font-bold text-sky-950 outline-none focus:ring-2 focus:ring-sky-200"
+          />
+          <p className="mt-2 text-xs text-sky-700">
+            {configuration
+              ? `Mensualidad: ${currencyFormatter.format(configuration.costo_mensualidad)}`
+              : configurationError}
           </p>
         </article>
       </div>
@@ -499,6 +706,7 @@ export default function StudentDetailPage() {
                 name="amount"
                 type="number"
                 min="0.01"
+                max={activePendingAmount || undefined}
                 step="0.01"
                 inputMode="decimal"
                 required
@@ -511,19 +719,20 @@ export default function StudentDetailPage() {
           </div>
 
           <div>
-            <label htmlFor="paymentType" className="block text-sm font-medium text-slate-700">
-              Tipo de pago
-            </label>
-            <select
-              id="paymentType"
-              name="paymentType"
-              value={paymentType}
-              onChange={(event) => setPaymentType(event.target.value as PaymentType)}
-              className={fieldClass}
-            >
-              <option value="inscripcion">Inscripción</option>
-              <option value="mensualidad">Mensualidad</option>
-            </select>
+            <p className="block text-sm font-medium text-slate-700">
+              Concepto automático
+            </p>
+            <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3">
+              <p className="text-sm font-semibold text-sky-950">
+                {activeConceptLabel}
+              </p>
+              {configuration && activePaymentType && (
+                <p className="mt-1 text-xs text-sky-700">
+                  Saldo por cubrir:{" "}
+                  {currencyFormatter.format(activePendingAmount)}
+                </p>
+              )}
+            </div>
           </div>
 
           {formError && (
@@ -544,7 +753,9 @@ export default function StudentDetailPage() {
           <div className="sm:col-span-2">
             <button
               type="submit"
-              disabled={isSaving}
+              disabled={
+                isSaving || !configuration || activePaymentType === null
+              }
               className="rounded-lg bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? "Registrando..." : "Registrar Pago"}
@@ -552,6 +763,56 @@ export default function StudentDetailPage() {
           </div>
         </form>
       </div>
+
+      <section className="mt-8">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-950">
+            Mensualidades del ciclo
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Agosto a julio · deuda pendiente total:{" "}
+            {currencyFormatter.format(student.deuda_mensualidad)}
+          </p>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {monthlyStatuses.map((month) => (
+            <article
+              key={month.value}
+              className={`rounded-xl border p-4 ${
+                month.isPaid
+                  ? "border-emerald-200 bg-emerald-50"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-950">
+                    {month.label} {month.year}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Costo:{" "}
+                    {currencyFormatter.format(
+                      configuration?.costo_mensualidad ?? 0,
+                    )}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Abonado: {currencyFormatter.format(month.paidAmount)}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-2 py-1 text-xs font-medium ${
+                    month.isPaid
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {month.isPaid ? "Pagado" : "Pendiente"}
+                </span>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <PaymentHistory
         payments={payments}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { getFullStudentName } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type { Alumno } from "@/types/database";
 
@@ -27,6 +28,8 @@ export default function StudentsPage() {
         const { data, error: queryError } = await supabase
           .from("alumnos")
           .select("*")
+          .order("apellido_paterno")
+          .order("apellido_materno")
           .order("nombre");
 
         if (queryError) throw queryError;
@@ -237,7 +240,7 @@ export default function StudentsPage() {
                 filteredStudents.map((student) => (
                   <tr key={student.id} className="transition-colors hover:bg-slate-50">
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-slate-900">
-                      {student.nombre}
+                      {getFullStudentName(student)}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm capitalize text-slate-600">
                       {student.nivel}
@@ -259,7 +262,7 @@ export default function StudentsPage() {
                       <Link
                         href={`/dashboard/admin/alumnos/${student.id}`}
                         className="font-medium text-sky-600 transition hover:text-sky-800 focus:outline-none focus:underline"
-                        aria-label={`Ver detalles de ${student.nombre}`}
+                        aria-label={`Ver detalles de ${getFullStudentName(student)}`}
                       >
                         Ver detalles
                       </Link>

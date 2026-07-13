@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { getFullStudentName } from "@/lib/academic";
 import type {
   Alumno,
   NivelEscolar,
@@ -12,6 +13,8 @@ type StudentSummary = Pick<
   Alumno,
   | "id"
   | "nombre"
+  | "apellido_paterno"
+  | "apellido_materno"
   | "nivel"
   | "grado"
   | "grupo"
@@ -82,8 +85,10 @@ export default function ReportsPage() {
         let studentsQuery = supabase
           .from("alumnos")
           .select(
-            "id, nombre, nivel, grado, grupo, deuda_mensualidad, deuda_inscripcion",
+            "id, nombre, apellido_paterno, apellido_materno, nivel, grado, grupo, deuda_mensualidad, deuda_inscripcion",
           )
+          .order("apellido_paterno")
+          .order("apellido_materno")
           .order("nombre");
 
         if (levelFilter !== "todos") {
@@ -200,7 +205,7 @@ export default function ReportsPage() {
     const data = [
       ["Nombre", "Nivel", "Grado", "Grupo", "Total Pagado", "Total Pendiente"],
       ...rows.map((row) => [
-        row.nombre,
+        getFullStudentName(row),
         row.nivel,
         row.grado,
         row.grupo,
@@ -376,7 +381,7 @@ export default function ReportsPage() {
                 rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50">
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-slate-900">
-                      {row.nombre}
+                      {getFullStudentName(row)}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm capitalize text-slate-600">
                       {row.nivel} · {row.grado}° · Grupo {row.grupo}
