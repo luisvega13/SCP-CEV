@@ -1,0 +1,1 @@
+export default function AdminDashboardPage() { return <section><p className="text-sm font-medium text-sky-600">Panel administrativo</p><h1 className="mt-1 text-3xl font-bold">Resumen general</h1><p className="mt-3 text-slate-600">Aquí se mostrarán los indicadores de alumnos y pagos.</p></section>; }

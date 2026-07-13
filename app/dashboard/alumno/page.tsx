@@ -1,0 +1,1 @@
+export default function StudentDashboardPage() { return <section><p className="text-sm font-medium text-sky-600">Mi cuenta</p><h1 className="mt-1 text-3xl font-bold">Estado de pagos</h1><p className="mt-3 text-slate-600">Aquí se mostrarán el historial y los próximos pagos del alumno.</p></section>; }
