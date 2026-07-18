@@ -2,23 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { TableSkeletonRows } from "@/components/TableSkeletonRows";
 import { getFullStudentName } from "@/lib/academic";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-import type { Alumno, Pago } from "@/types/database";
-
-type RecentPayment = Pick<
-  Pago,
-  "id" | "monto" | "tipo_pago" | "fecha_pago" | "mes" | "anio"
-> & {
-  alumnos: Pick<
-    Alumno,
-    | "id"
-    | "nombre"
-    | "apellido_paterno"
-    | "apellido_materno"
-    | "matricula"
-  >;
-};
+import {
+  loadRecentPayments as fetchRecentPayments,
+  type RecentPayment,
+} from "@/lib/admin-data";
 
 const currencyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
@@ -41,16 +30,7 @@ export default function PaymentsPage() {
 
     async function loadRecentPayments() {
       try {
-        const supabase = getSupabaseBrowserClient();
-        const { data, error: queryError } = await supabase
-          .from("pagos")
-          .select(
-            "id, monto, tipo_pago, fecha_pago, mes, anio, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, matricula)",
-          )
-          .order("fecha_pago", { ascending: false })
-          .limit(20);
-
-        if (queryError) throw queryError;
+        const data = await fetchRecentPayments();
         if (isMounted) setPayments(data);
       } catch (caughtError) {
         if (isMounted) {
@@ -122,14 +102,10 @@ export default function PaymentsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-12 text-center text-sm text-slate-500"
-                  >
-                    Cargando movimientos...
-                  </td>
-                </tr>
+                <TableSkeletonRows
+                  columns={7}
+                  label="Cargando movimientos..."
+                />
               )}
               {!isLoading && !error && payments.length === 0 && (
                 <tr>

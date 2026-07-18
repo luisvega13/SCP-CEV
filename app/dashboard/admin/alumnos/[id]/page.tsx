@@ -3,8 +3,9 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { PaymentHistory } from "@/components/PaymentHistory";
+import { invalidateAdminData } from "@/lib/admin-data";
 import {
   ACADEMIC_MONTHS,
   getAcademicMonthYear,
@@ -41,6 +42,7 @@ function getErrorMessage(caughtError: unknown, fallback: string) {
 
 export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const studentId = params.id;
   const [student, setStudent] = useState<Alumno | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,7 +58,9 @@ export default function StudentDetailPage() {
   const [payments, setPayments] = useState<Pago[]>([]);
   const [isPaymentsLoading, setIsPaymentsLoading] = useState(true);
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(
+    () => searchParams.get("editar") === "1",
+  );
   const [editName, setEditName] = useState("");
   const [editPaternalSurname, setEditPaternalSurname] = useState("");
   const [editMaternalSurname, setEditMaternalSurname] = useState("");
@@ -240,6 +244,8 @@ export default function StudentDetailPage() {
 
       if (updateError) throw updateError;
 
+      invalidateAdminData("students:");
+      invalidateAdminData("reports:");
       setStudent(data);
       setIsEditing(false);
       setProfileMessage("La información académica se actualizó correctamente.");
@@ -254,11 +260,9 @@ export default function StudentDetailPage() {
     }
   }
 
-  async function handleStatusChange() {
+  async function handleStatusChange(nextStatus: Alumno["estado"]) {
     if (!student) return;
-
-    const nextStatus: Alumno["estado"] =
-      student.estado === "activo" ? "baja" : "activo";
+    if (nextStatus === student.estado) return;
 
     setProfileError("");
     setProfileMessage("");
@@ -275,12 +279,16 @@ export default function StudentDetailPage() {
 
       if (updateError) throw updateError;
 
+      invalidateAdminData("students:");
+      invalidateAdminData("dashboard:");
+      invalidateAdminData("reports:");
       setStudent(data);
-      setProfileMessage(
-        nextStatus === "activo"
-          ? "El alumno fue reactivado correctamente."
-          : "El alumno fue dado de baja correctamente.",
-      );
+      const statusMessages: Record<Alumno["estado"], string> = {
+        activo: "El alumno fue reactivado correctamente.",
+        pausa: "El alumno quedó en pausa temporal.",
+        baja: "El alumno fue dado de baja correctamente.",
+      };
+      setProfileMessage(statusMessages[nextStatus]);
     } catch (caughtError) {
       setProfileError(
         caughtError instanceof Error
@@ -335,6 +343,9 @@ export default function StudentDetailPage() {
 
       if (insertError) throw insertError;
 
+      invalidateAdminData("payments:");
+      invalidateAdminData("dashboard:");
+      invalidateAdminData("reports:");
       setIsPaymentsLoading(true);
       const [studentResult, paymentsResult] = await Promise.all([
         supabase.from("alumnos").select("*").eq("id", studentId).single(),
@@ -374,7 +385,18 @@ export default function StudentDetailPage() {
   }
 
   if (isLoading) {
-    return <p className="py-12 text-center text-sm text-slate-500">Cargando alumno...</p>;
+    return (
+      <section className="mx-auto max-w-5xl animate-pulse" role="status">
+        <div className="h-4 w-28 rounded bg-slate-200" />
+        <div className="mt-5 h-9 w-80 max-w-full rounded bg-slate-200" />
+        <div className="mt-8 grid gap-4 sm:grid-cols-2">
+          <div className="h-36 rounded-xl bg-white shadow-sm ring-1 ring-slate-200" />
+          <div className="h-36 rounded-xl bg-white shadow-sm ring-1 ring-slate-200" />
+        </div>
+        <div className="mt-8 h-60 rounded-xl bg-white shadow-sm ring-1 ring-slate-200" />
+        <span className="sr-only">Cargando información del alumno...</span>
+      </section>
+    );
   }
 
   if (error || !student) {
@@ -450,13 +472,7 @@ export default function StudentDetailPage() {
             <h1 className="text-3xl font-bold text-slate-950">
               {getFullStudentName(student)}
             </h1>
-            <span
-              className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${
-                student.estado === "activo"
-                  ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20"
-                  : "bg-red-50 text-red-700 ring-red-600/20"
-              }`}
-            >
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize text-slate-600 ring-1 ring-inset ring-slate-300">
               {student.estado}
             </span>
           </div>
@@ -474,22 +490,18 @@ export default function StudentDetailPage() {
               Editar información
             </button>
           )}
-          <button
-            type="button"
-            onClick={handleStatusChange}
+          <label className="sr-only" htmlFor="academic-status">Estado académico</label>
+          <select
+            id="academic-status"
+            value={student.estado}
             disabled={isUpdatingStatus}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-              student.estado === "activo"
-                ? "bg-red-600 hover:bg-red-700"
-                : "bg-emerald-600 hover:bg-emerald-700"
-            }`}
+            onChange={(event) => void handleStatusChange(event.target.value as Alumno["estado"])}
+            className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isUpdatingStatus
-              ? "Actualizando..."
-              : student.estado === "activo"
-                ? "Dar de baja"
-                : "Reactivar alumno"}
-          </button>
+            <option value="activo">Activo</option>
+            <option value="pausa">Pausa temporal</option>
+            <option value="baja">Baja definitiva</option>
+          </select>
         </div>
       </div>
 
@@ -513,6 +525,7 @@ export default function StudentDetailPage() {
 
       {isEditing && (
         <form
+          id="editar-informacion"
           onSubmit={handleUpdate}
           className="mt-8 grid gap-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-2"
         >
@@ -686,7 +699,7 @@ export default function StudentDetailPage() {
         </article>
       </div>
 
-      <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+      <div id="registrar-pago" className="mt-8 scroll-mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div>
           <h2 className="text-xl font-semibold text-slate-950">Registrar pago</h2>
           <p className="mt-1 text-sm text-slate-500">

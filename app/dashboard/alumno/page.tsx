@@ -5,6 +5,7 @@ import { PaymentHistory } from "@/components/PaymentHistory";
 import {
   ACADEMIC_MONTHS,
   getAcademicMonthYear,
+  getCurrentAcademicMonthIndex,
   getCurrentAcademicCycle,
   getFullStudentName,
 } from "@/lib/academic";
@@ -29,6 +30,7 @@ export default function StudentDashboardPage() {
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
   const [configuration, setConfiguration] =
     useState<ConfiguracionCostos | null>(null);
+  const [currentDate] = useState(() => new Date());
   const [cycle] = useState(getCurrentAcademicCycle);
 
   useEffect(() => {
@@ -140,9 +142,8 @@ export default function StudentDashboardPage() {
     );
   }
 
-  const totalDebt =
-    student.deuda_mensualidad + student.deuda_inscripcion;
-  const monthlyStatuses = ACADEMIC_MONTHS.map((month) => {
+  const currentMonthIndex = getCurrentAcademicMonthIndex(currentDate);
+  const monthlyStatuses = ACADEMIC_MONTHS.map((month, index) => {
     const year = getAcademicMonthYear(month.value, cycle);
     const paidAmount = payments
       .filter(
@@ -155,13 +156,28 @@ export default function StudentDashboardPage() {
 
     return {
       ...month,
+      index,
       year,
       paidAmount,
+      pendingAmount: configuration
+        ? Math.max(configuration.costo_mensualidad - paidAmount, 0)
+        : 0,
+      isCurrent: index === currentMonthIndex,
+      isDue: index <= currentMonthIndex,
       isPaid:
         configuration !== null &&
         paidAmount >= configuration.costo_mensualidad,
     };
   });
+  const currentMonth = monthlyStatuses[currentMonthIndex];
+  const accruedMonthlyDebt = configuration
+    ? monthlyStatuses
+        .filter((month) => month.isDue)
+        .reduce((total, month) => total + month.pendingAmount, 0)
+    : 0;
+  const accountStatusReady =
+    !isPaymentsLoading && !paymentsError && configuration !== null;
+  const isAccountCurrent = accountStatusReady && accruedMonthlyDebt < 0.01;
 
   return (
     <section className="mx-auto max-w-5xl">
@@ -245,14 +261,61 @@ export default function StudentDashboardPage() {
             </p>
           </div>
           <div className="text-right">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Deuda total
-            </p>
-            <p className="mt-1 text-xl font-bold tabular-nums text-slate-950">
-              {currencyFormatter.format(totalDebt)}
-            </p>
+            {!accountStatusReady ? (
+              <p className="text-sm font-semibold text-slate-500">
+                Calculando estado...
+              </p>
+            ) : isAccountCurrent ? (
+              <div className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-600/20">
+                Estado: Al corriente
+              </div>
+            ) : (
+              <div className="rounded-xl bg-amber-100 px-4 py-2 text-right text-amber-900 ring-1 ring-inset ring-amber-600/20">
+                <p className="text-xs font-semibold uppercase tracking-wide">
+                  Saldo vencido
+                </p>
+                <p className="mt-0.5 text-lg font-bold tabular-nums">
+                  {currencyFormatter.format(accruedMonthlyDebt)}
+                </p>
+              </div>
+            )}
           </div>
         </div>
+
+        {accountStatusReady && (
+          <div
+            className={`mt-5 rounded-xl border p-5 ${
+              isAccountCurrent
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-amber-200 bg-amber-50"
+            }`}
+          >
+            <p
+              className={`text-lg font-bold ${
+                isAccountCurrent ? "text-emerald-900" : "text-amber-900"
+              }`}
+            >
+              {isAccountCurrent
+                ? "¡Estás al corriente!"
+                : "Tienes pagos pendientes"}
+            </p>
+            <p
+              className={`mt-1 text-sm ${
+                isAccountCurrent ? "text-emerald-700" : "text-amber-800"
+              }`}
+            >
+              {isAccountCurrent
+                ? `Tus mensualidades están cubiertas hasta ${currentMonth.label} ${currentMonth.year}.`
+                : `Adeudo acumulado hasta ${currentMonth.label} ${currentMonth.year}: ${currencyFormatter.format(accruedMonthlyDebt)}.`}
+            </p>
+          </div>
+        )}
+
+        {!isPaymentsLoading && !configuration && (
+          <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            No es posible calcular tu estado porque los costos del ciclo aún no están configurados.
+          </p>
+        )}
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <article className="rounded-xl border border-violet-200 bg-violet-50 p-6">
@@ -282,36 +345,59 @@ export default function StudentDashboardPage() {
           Mensualidades del ciclo
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Agosto a julio · saldo pendiente:{" "}
-          {currencyFormatter.format(student.deuda_mensualidad)}
+          Agosto a julio · saldo hasta {currentMonth.label}:{" "}
+          {accountStatusReady
+            ? currencyFormatter.format(accruedMonthlyDebt)
+            : "Calculando..."}
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {monthlyStatuses.map((month) => (
             <article
               key={month.value}
-              className={`rounded-xl border p-4 ${
-                month.isPaid
-                  ? "border-emerald-200 bg-emerald-50"
-                  : "border-slate-200 bg-white"
+              className={`rounded-xl border p-4 transition ${
+                month.isCurrent
+                  ? "border-sky-400 bg-sky-50 ring-2 ring-sky-100"
+                  : month.isPaid
+                    ? "border-emerald-200 bg-emerald-50"
+                    : month.isDue
+                      ? "border-amber-200 bg-amber-50"
+                      : "border-slate-200 bg-white"
               }`}
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-semibold text-slate-950">
                     {month.label} {month.year}
                   </p>
+                  {month.isCurrent && (
+                    <p className="mt-1 text-xs font-semibold text-sky-700">
+                      Mes actual
+                    </p>
+                  )}
                   <p className="mt-1 text-xs text-slate-500">
                     Abonado: {currencyFormatter.format(month.paidAmount)}
                   </p>
+                  {month.isDue && !month.isPaid && configuration && (
+                    <p className="mt-1 text-xs font-medium text-amber-800">
+                      Pendiente:{" "}
+                      {currencyFormatter.format(month.pendingAmount)}
+                    </p>
+                  )}
                 </div>
                 <span
                   className={`rounded-full px-2 py-1 text-xs font-medium ${
                     month.isPaid
                       ? "bg-emerald-100 text-emerald-700"
-                      : "bg-amber-100 text-amber-700"
+                      : month.isDue
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-slate-100 text-slate-600"
                   }`}
                 >
-                  {month.isPaid ? "Pagado" : "Pendiente"}
+                  {month.isPaid
+                    ? "Pagado"
+                    : month.isDue
+                      ? "Pendiente"
+                      : "Próximo"}
                 </span>
               </div>
             </article>

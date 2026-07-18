@@ -1,13 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-
-type DashboardMetrics = {
-  activeStudents: number;
-  totalDebt: number;
-  monthlyPayments: number;
-};
+import {
+  loadDashboardMetrics as fetchDashboardMetrics,
+  type DashboardMetrics,
+} from "@/lib/admin-data";
 
 const currencyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
@@ -28,42 +25,10 @@ export default function AdminDashboardPage() {
 
     async function loadMetrics() {
       try {
-        const supabase = getSupabaseBrowserClient();
-        const today = new Date();
-        const startOfMonth = new Date(
-          today.getFullYear(),
-          today.getMonth(),
-          1,
-        ).toISOString();
-
-        const [studentsResult, paymentsResult] = await Promise.all([
-          supabase
-            .from("alumnos")
-            .select("deuda_mensualidad, deuda_inscripcion")
-            .eq("estado", "activo"),
-          supabase
-            .from("pagos")
-            .select("id", { count: "exact", head: true })
-            .gte("fecha_pago", startOfMonth),
-        ]);
-
-        if (studentsResult.error) throw studentsResult.error;
-        if (paymentsResult.error) throw paymentsResult.error;
-
-        const totalDebt = studentsResult.data.reduce(
-          (total, student) =>
-            total +
-            student.deuda_mensualidad +
-            student.deuda_inscripcion,
-          0,
-        );
+        const data = await fetchDashboardMetrics();
 
         if (isMounted) {
-          setMetrics({
-            activeStudents: studentsResult.data.length,
-            totalDebt,
-            monthlyPayments: paymentsResult.count ?? 0,
-          });
+          setMetrics(data);
         }
       } catch (caughtError) {
         if (isMounted) {

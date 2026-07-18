@@ -3,6 +3,10 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { getCurrentAcademicCycle } from "@/lib/academic";
+import {
+  invalidateAdminData,
+  loadConfigurations as fetchConfigurations,
+} from "@/lib/admin-data";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   ConfiguracionCostos,
@@ -35,14 +39,7 @@ export default function ConfigurationPage() {
 
     async function loadConfigurations() {
       try {
-        const supabase = getSupabaseBrowserClient();
-        const { data, error: queryError } = await supabase
-          .from("configuracion_costos")
-          .select("*")
-          .eq("ciclo_escolar", cycle)
-          .order("nivel");
-
-        if (queryError) throw queryError;
+        const data = await fetchConfigurations(cycle);
         if (isMounted) setConfigurations(data);
       } catch (caughtError) {
         if (isMounted) {
@@ -116,6 +113,9 @@ export default function ConfigurationPage() {
 
       if (rpcError) throw rpcError;
 
+      invalidateAdminData("configurations:");
+      invalidateAdminData("dashboard:");
+      invalidateAdminData("reports:");
       setConfigurations((current) => [
         ...current.filter(
           (configuration) => configuration.nivel !== data.nivel,
@@ -185,7 +185,11 @@ export default function ConfigurationPage() {
                   {itemLevel}
                 </p>
                 {isLoading ? (
-                  <p className="mt-3 text-sm text-slate-400">Cargando...</p>
+                  <div className="mt-3 space-y-2" role="status">
+                    <div className="h-4 w-32 animate-pulse rounded bg-slate-200" />
+                    <div className="h-4 w-36 animate-pulse rounded bg-slate-200" />
+                    <span className="sr-only">Cargando costos...</span>
+                  </div>
                 ) : configuration ? (
                   <div className="mt-3 space-y-1 text-sm text-slate-600">
                     <p>
