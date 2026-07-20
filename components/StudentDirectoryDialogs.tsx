@@ -11,13 +11,20 @@ import {
   getAcademicMonthYear,
   getCurrentAcademicCycle,
   getFullStudentName,
+  getReEnrollmentLevel,
 } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { PAYMENT_METHOD_OPTIONS } from "@/lib/payments";
+import {
+  getDiscountedCost,
+  type AppliedScholarship,
+} from "@/lib/scholarships";
 import type {
   AlumnoInsert,
   ConfiguracionCostos,
   Database,
   EstadoAlumno,
+  MetodoPago,
   MesPago,
   NivelEscolar,
   Pago,
@@ -76,6 +83,7 @@ export function QuickPaymentModal({
 }) {
   const [details, setDetails] = useState<QuickPayment | null>(null);
   const [amount, setAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<MetodoPago>("efectivo");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
@@ -89,7 +97,8 @@ export function QuickPaymentModal({
       setError("");
       try {
         const supabase = getSupabaseBrowserClient();
-        const [studentResult, configurationResult, paymentsResult] =
+        const billingLevel = getReEnrollmentLevel(student, cycle);
+        const [studentResult, configurationResult, paymentsResult, scholarshipResult] =
           await Promise.all([
             supabase
               .from("alumnos")
@@ -98,26 +107,39 @@ export function QuickPaymentModal({
               .single(),
             supabase
               .from("configuracion_costos")
-              .select("nivel, costo_inscripcion, costo_mensualidad, ciclo_escolar")
-              .eq("nivel", student.nivel)
+              .select("nivel, costo_inscripcion, costo_mensualidad, ciclo_escolar, fecha_limite_inscripcion")
+              .eq("nivel", billingLevel)
               .eq("ciclo_escolar", cycle)
               .maybeSingle(),
             supabase
               .from("pagos")
               .select("id, alumno_id, monto, tipo_pago, fecha_pago, mes, anio")
               .eq("alumno_id", student.id),
+            supabase
+              .from("alumnos_becas")
+              .select("porcentaje_aplicado, alcance_aplicado, becas!inner(nombre)")
+              .eq("alumno_id", student.id)
+              .eq("ciclo_escolar", cycle)
+              .maybeSingle(),
           ]);
 
         if (studentResult.error) throw studentResult.error;
         if (configurationResult.error) throw configurationResult.error;
         if (paymentsResult.error) throw paymentsResult.error;
+        if (scholarshipResult.error) throw scholarshipResult.error;
         if (!configurationResult.data) {
-          throw new Error(`No hay costos configurados para ${student.nivel} en ${cycle}.`);
+          throw new Error(`No hay costos configurados para ${billingLevel} en ${cycle}.`);
         }
 
         const balance = studentResult.data;
         const configuration = configurationResult.data as ConfiguracionCostos;
         const payments = paymentsResult.data as Pago[];
+        const scholarship = scholarshipResult.data as unknown as AppliedScholarship | null;
+        const effectiveMonthlyCost = getDiscountedCost(
+          configuration.costo_mensualidad,
+          scholarship,
+          "mensualidad",
+        );
         let nextPayment: QuickPayment | null = null;
 
         if (balance.deuda_inscripcion > 0) {
@@ -140,7 +162,7 @@ export function QuickPaymentModal({
                   payment.anio === year,
               )
               .reduce((total, payment) => total + payment.monto, 0);
-            const pending = Math.max(configuration.costo_mensualidad - paid, 0);
+            const pending = Math.max(effectiveMonthlyCost - paid, 0);
             if (pending > 0) {
               nextPayment = {
                 totalBalance: balance.deuda_mensualidad,
@@ -169,7 +191,7 @@ export function QuickPaymentModal({
     return () => {
       mounted = false;
     };
-  }, [cycle, student.id, student.nivel]);
+  }, [cycle, student]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -192,6 +214,7 @@ export function QuickPaymentModal({
         alumno_id: student.id,
         monto: numericAmount,
         tipo_pago: details.paymentType,
+        metodo_pago: paymentMethod,
         mes: details.month,
         anio: details.year,
       });
@@ -229,6 +252,10 @@ export function QuickPaymentModal({
             <label htmlFor="quick-payment-amount" className="mt-5 block text-sm font-medium text-slate-700">Monto a pagar</label>
             <input id="quick-payment-amount" type="number" min="0.01" max={details.pendingAmount} step="0.01" required value={amount} onChange={(event) => setAmount(event.target.value)} className={fieldClass} />
             <p className="mt-2 text-xs text-slate-500">Saldo del concepto: {currencyFormatter.format(details.pendingAmount)}</p>
+            <label htmlFor="quick-payment-method" className="mt-5 block text-sm font-medium text-slate-700">Método de pago</label>
+            <select id="quick-payment-method" required value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as MetodoPago)} className={fieldClass}>
+              {PAYMENT_METHOD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
             {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
             <button type="submit" disabled={isSaving} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60">{isSaving && <LoaderCircle className="h-4 w-4 animate-spin" />}{isSaving ? "Registrando..." : "Registrar pago"}</button>
           </form>

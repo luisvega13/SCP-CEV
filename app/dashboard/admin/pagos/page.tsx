@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { TableSkeletonRows } from "@/components/TableSkeletonRows";
 import { getFullStudentName } from "@/lib/academic";
+import { getPaymentMethodLabel } from "@/lib/payments";
 import {
   loadRecentPayments as fetchRecentPayments,
   type RecentPayment,
@@ -78,7 +79,7 @@ export default function PaymentsPage() {
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
-                {["Fecha y hora", "Alumno", "Matrícula", "Tipo", "Periodo"].map(
+                {["Fecha y hora", "Alumno", "Matrícula", "Tipo", "Periodo", "Método"].map(
                   (heading) => (
                     <th
                       key={heading}
@@ -103,14 +104,14 @@ export default function PaymentsPage() {
             <tbody className="divide-y divide-slate-100">
               {isLoading && (
                 <TableSkeletonRows
-                  columns={7}
+                  columns={8}
                   label="Cargando movimientos..."
                 />
               )}
               {!isLoading && !error && payments.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-6 py-12 text-center text-sm text-slate-500"
                   >
                     Todavía no se han registrado pagos.
@@ -135,6 +136,9 @@ export default function PaymentsPage() {
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm capitalize text-slate-600">
                       {payment.mes} {payment.anio}
+                    </td>
+                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600">
+                      {getPaymentMethodLabel(payment.metodo_pago)}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-semibold tabular-nums text-slate-900">
                       {currencyFormatter.format(payment.monto)}

@@ -1,11 +1,13 @@
 import { getCurrentAcademicCycle } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
+  AdminDashboardOverview,
   Alumno,
   ConfiguracionCostos,
   EstadoCuenta,
   FinancialReportKpis,
   Pago,
+  StudentFilterOptions,
 } from "@/types/database";
 
 const REQUEST_TTL_MS = 5_000;
@@ -58,11 +60,13 @@ export type StudentListItem = Pick<
   | "sexo"
   | "deuda_mensualidad"
   | "deuda_inscripcion"
+  | "ciclo_grado_actual"
+  | "promocion_habilitada"
 >;
 
 export type RecentPayment = Pick<
   Pago,
-  "id" | "monto" | "tipo_pago" | "fecha_pago" | "mes" | "anio"
+  "id" | "monto" | "tipo_pago" | "metodo_pago" | "fecha_pago" | "mes" | "anio"
 > & {
   alumnos: Pick<
     Alumno,
@@ -72,12 +76,6 @@ export type RecentPayment = Pick<
     | "apellido_materno"
     | "matricula"
   >;
-};
-
-export type DashboardMetrics = {
-  activeStudents: number;
-  totalDebt: number;
-  monthlyPayments: number;
 };
 
 export type FinancialAccountRow = Pick<
@@ -107,20 +105,93 @@ export type FinancialReportData = {
   kpis: FinancialReportKpis;
 };
 
-export function loadStudents() {
-  return loadOnce("students:list", async () => {
+export type FinancialReportQuery = {
+  page: number;
+  pageSize: number;
+  level: string;
+  grade: string;
+  group: string;
+  paymentType: string;
+  overdueOnly: boolean;
+};
+
+export type StudentDirectoryQuery = {
+  page: number;
+  pageSize: number;
+  search: string;
+  level: string;
+  grade: string;
+  group: string;
+  academicStatus: string;
+  sortKey: "matricula" | "nombre" | "trayectoria" | "estado";
+  sortDirection: "asc" | "desc";
+};
+
+const defaultStudentQuery: StudentDirectoryQuery = {
+  page: 1,
+  pageSize: 10,
+  search: "",
+  level: "todos",
+  grade: "todos",
+  group: "todos",
+  academicStatus: "todos",
+  sortKey: "nombre",
+  sortDirection: "asc",
+};
+
+export function loadStudents(params: Partial<StudentDirectoryQuery> = {}) {
+  const queryParams = { ...defaultStudentQuery, ...params };
+  return loadOnce(`students:list:${JSON.stringify(queryParams)}`, async () => {
     const supabase = getSupabaseBrowserClient();
-    const { data, error } = await supabase
+    const ascending = queryParams.sortDirection === "asc";
+    const from = (queryParams.page - 1) * queryParams.pageSize;
+    let query = supabase
       .from("alumnos")
       .select(
-        "id, nombre, apellido_paterno, apellido_materno, matricula, nivel, grado, grupo, estado, sexo, deuda_mensualidad, deuda_inscripcion",
+        "id, nombre, apellido_paterno, apellido_materno, matricula, nivel, grado, grupo, estado, sexo, deuda_mensualidad, deuda_inscripcion, ciclo_grado_actual, promocion_habilitada",
+        { count: "exact" },
       )
-      .order("apellido_paterno")
-      .order("apellido_materno")
-      .order("nombre");
+      .range(from, from + queryParams.pageSize - 1);
+
+    const safeSearch = queryParams.search.trim().replace(/[,()%_'"\\]/g, " ");
+    if (safeSearch) {
+      query = query.or(
+        `nombre.ilike.%${safeSearch}%,apellido_paterno.ilike.%${safeSearch}%,apellido_materno.ilike.%${safeSearch}%,matricula.ilike.%${safeSearch}%`,
+      );
+    }
+    if (queryParams.level !== "todos") query = query.eq("nivel", queryParams.level as Alumno["nivel"]);
+    if (queryParams.grade !== "todos") query = query.eq("grado", Number(queryParams.grade));
+    if (queryParams.group !== "todos") query = query.eq("grupo", queryParams.group);
+    if (queryParams.academicStatus !== "todos") {
+      query = query.eq(
+        "estado",
+        queryParams.academicStatus as Alumno["estado"],
+      );
+    }
+
+    if (queryParams.sortKey === "nombre") {
+      query = query.order("apellido_paterno", { ascending }).order("apellido_materno", { ascending }).order("nombre", { ascending });
+    } else if (queryParams.sortKey === "trayectoria") {
+      query = query.order("nivel", { ascending }).order("grado", { ascending }).order("grupo", { ascending });
+    } else {
+      query = query.order(queryParams.sortKey, { ascending });
+    }
+
+    const { data, count, error } = await query;
 
     if (error) throw error;
-    return data;
+    return { students: data, total: count ?? 0 };
+  });
+}
+
+export function loadStudentFilterOptions() {
+  return loadOnce("students:filters", async () => {
+    const { data, error } = await getSupabaseBrowserClient().rpc(
+      "obtener_filtros_directorio_alumnos",
+      {},
+    );
+    if (error) throw error;
+    return data as StudentFilterOptions;
   });
 }
 
@@ -130,7 +201,7 @@ export function loadRecentPayments() {
     const { data, error } = await supabase
       .from("pagos")
       .select(
-        "id, monto, tipo_pago, fecha_pago, mes, anio, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, matricula)",
+        "id, monto, tipo_pago, metodo_pago, fecha_pago, mes, anio, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, matricula)",
       )
       .order("fecha_pago", { ascending: false })
       .limit(20);
@@ -145,7 +216,7 @@ export function loadConfigurations(cycle: string) {
     const supabase = getSupabaseBrowserClient();
     const { data, error } = await supabase
       .from("configuracion_costos")
-      .select("nivel, costo_inscripcion, costo_mensualidad, ciclo_escolar")
+      .select("nivel, costo_inscripcion, costo_mensualidad, ciclo_escolar, fecha_limite_inscripcion")
       .eq("ciclo_escolar", cycle)
       .order("nivel");
 
@@ -154,44 +225,26 @@ export function loadConfigurations(cycle: string) {
   });
 }
 
-export function loadDashboardMetrics() {
-  return loadOnce("dashboard:metrics", async () => {
+export function loadDashboardMetrics(cycle = getCurrentAcademicCycle()) {
+  return loadOnce(`dashboard:metrics:${cycle}`, async () => {
     const supabase = getSupabaseBrowserClient();
-    const today = new Date();
-    const startOfMonth = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      1,
-    ).toISOString();
+    const pauseResult = await supabase.rpc(
+      "aplicar_pausas_por_inscripcion_vencida",
+      {},
+    );
+    if (pauseResult.error) throw pauseResult.error;
 
-    const [studentsResult, paymentsResult] = await Promise.all([
-      supabase
-        .from("alumnos")
-        .select("deuda_mensualidad, deuda_inscripcion")
-        .eq("estado", "activo"),
-      supabase
-        .from("pagos")
-        .select("id", { count: "exact", head: true })
-        .gte("fecha_pago", startOfMonth),
-    ]);
-
-    if (studentsResult.error) throw studentsResult.error;
-    if (paymentsResult.error) throw paymentsResult.error;
-
-    return {
-      activeStudents: studentsResult.data.length,
-      totalDebt: studentsResult.data.reduce(
-        (total, student) =>
-          total + student.deuda_mensualidad + student.deuda_inscripcion,
-        0,
-      ),
-      monthlyPayments: paymentsResult.count ?? 0,
-    } satisfies DashboardMetrics;
+    const { data, error } = await supabase.rpc(
+      "obtener_resumen_administrativo",
+      { p_ciclo_escolar: cycle },
+    );
+    if (error) throw error;
+    return data as AdminDashboardOverview;
   });
 }
 
-export function loadFinancialReportData() {
-  return loadOnce("reports:financial", async () => {
+export function loadFinancialReportKpis() {
+  return loadOnce("reports:kpis", async () => {
     const supabase = getSupabaseBrowserClient();
     const { error: refreshError } = await supabase.rpc(
       "actualizar_estatus_estado_cuenta",
@@ -199,30 +252,43 @@ export function loadFinancialReportData() {
     );
     if (refreshError) throw refreshError;
 
-    const [accountsResult, kpisResult] = await Promise.all([
-      supabase
-        .from("estado_cuenta")
-        .select(
-          "id, concepto, tipo_pago, monto_esperado, monto_pagado, fecha_limite, estatus, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, nivel, grado, grupo)",
-        )
-        .order("fecha_limite", { ascending: true }),
-      supabase.rpc("obtener_kpis_reportes_financieros", {}),
-    ]);
-
-    if (accountsResult.error) throw accountsResult.error;
+    const kpisResult = await supabase.rpc("obtener_kpis_reportes_financieros", {});
     if (kpisResult.error) throw kpisResult.error;
 
     return {
-      rows: accountsResult.data as FinancialAccountRow[],
-      kpis: {
-        total_recaudado: Number(kpisResult.data.total_recaudado),
-        saldo_actual_vencido: Number(
-          kpisResult.data.saldo_actual_vencido,
-        ),
-        proyeccion_ingresos: Number(kpisResult.data.proyeccion_ingresos),
-        alumnos_con_adeudo: Number(kpisResult.data.alumnos_con_adeudo),
-      },
-    } satisfies FinancialReportData;
+      total_recaudado: Number(kpisResult.data.total_recaudado),
+      saldo_actual_vencido: Number(kpisResult.data.saldo_actual_vencido),
+      proyeccion_ingresos: Number(kpisResult.data.proyeccion_ingresos),
+      alumnos_con_adeudo: Number(kpisResult.data.alumnos_con_adeudo),
+    } satisfies FinancialReportKpis;
+  });
+}
+
+export function loadFinancialReportPage(params: FinancialReportQuery) {
+  return loadOnce(`reports:page:${JSON.stringify(params)}`, async () => {
+    const supabase = getSupabaseBrowserClient();
+    const from = (params.page - 1) * params.pageSize;
+    let query = supabase
+      .from("estado_cuenta")
+      .select(
+        "id, concepto, tipo_pago, monto_esperado, monto_pagado, fecha_limite, estatus, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, nivel, grado, grupo)",
+        { count: "exact" },
+      )
+      .order("fecha_limite", { ascending: true })
+      .range(from, from + params.pageSize - 1);
+
+    if (params.level !== "todos") query = query.eq("alumnos.nivel", params.level as Alumno["nivel"]);
+    if (params.grade !== "todos") query = query.eq("alumnos.grado", Number(params.grade));
+    if (params.group !== "todos") query = query.eq("alumnos.grupo", params.group);
+    if (params.paymentType !== "todos") query = query.eq("tipo_pago", params.paymentType as Pago["tipo_pago"]);
+    if (params.overdueOnly) query = query.eq("estatus", "vencido");
+
+    const { data, count, error } = await query;
+    if (error) throw error;
+    return {
+      rows: data as FinancialAccountRow[],
+      total: count ?? 0,
+    };
   });
 }
 
@@ -235,7 +301,18 @@ export function preloadAdminRoute(href: string) {
     case "/dashboard/admin/pagos":
       return loadRecentPayments();
     case "/dashboard/admin/reportes":
-      return loadFinancialReportData();
+      return Promise.all([
+        loadFinancialReportKpis(),
+        loadFinancialReportPage({
+          page: 1,
+          pageSize: 10,
+          level: "todos",
+          grade: "todos",
+          group: "todos",
+          paymentType: "todos",
+          overdueOnly: false,
+        }),
+      ]);
     case "/dashboard/admin/configuracion":
       return loadConfigurations(getCurrentAcademicCycle());
     default:

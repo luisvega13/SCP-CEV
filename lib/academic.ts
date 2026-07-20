@@ -1,4 +1,4 @@
-import type { Alumno, MesPago } from "@/types/database";
+import type { Alumno, MesPago, NivelEscolar } from "@/types/database";
 
 export const ACADEMIC_MONTHS: Array<{
   value: MesPago;
@@ -39,6 +39,24 @@ export function getAcademicMonthYear(month: MesPago, cycle: string) {
     (item) => item.value === month,
   );
   return getCycleStartYear(cycle) + (configuration?.yearOffset ?? 0);
+}
+
+export function getReEnrollmentLevel(
+  student: Pick<
+    Alumno,
+    | "nivel"
+    | "grado"
+    | "ciclo_grado_actual"
+    | "promocion_habilitada"
+  >,
+  cycle: string,
+): NivelEscolar {
+  if (!student.promocion_habilitada || cycle <= student.ciclo_grado_actual) {
+    return student.nivel;
+  }
+  if (student.nivel === "primaria" && student.grado >= 6) return "secundaria";
+  if (student.nivel === "secundaria" && student.grado >= 3) return "bachillerato";
+  return student.nivel;
 }
 
 export function getFullStudentName(

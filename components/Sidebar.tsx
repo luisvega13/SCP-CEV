@@ -17,6 +17,7 @@ const linksByRole: Record<UserRole, Array<{ label: string; href: string }>> = {
   admin: [
     { label: "Alumnos", href: "/dashboard/admin/alumnos" },
     { label: "Pagos", href: "/dashboard/admin/pagos" },
+    { label: "Becas", href: "/dashboard/admin/becas" },
     { label: "Reportes", href: "/dashboard/admin/reportes" },
     { label: "Configuración", href: "/dashboard/admin/configuracion" },
   ],

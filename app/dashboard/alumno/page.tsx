@@ -10,9 +10,15 @@ import {
   getFullStudentName,
 } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import {
+  getDiscountedCost,
+  getScholarshipScopeLabel,
+  type AppliedScholarship,
+} from "@/lib/scholarships";
 import type {
   Alumno,
   ConfiguracionCostos,
+  EstadoCuenta,
   Pago,
 } from "@/types/database";
 
@@ -30,6 +36,8 @@ export default function StudentDashboardPage() {
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
   const [configuration, setConfiguration] =
     useState<ConfiguracionCostos | null>(null);
+  const [scholarship, setScholarship] = useState<AppliedScholarship | null>(null);
+  const [overdueBalance, setOverdueBalance] = useState(0);
   const [currentDate] = useState(() => new Date());
   const [cycle] = useState(getCurrentAcademicCycle);
 
@@ -66,11 +74,12 @@ export default function StudentDashboardPage() {
         }
 
         try {
-          const [paymentsResult, configurationResult] = await Promise.all([
+          const [paymentsResult, configurationResult, accountResult, scholarshipResult] = await Promise.all([
             supabase
               .from("pagos")
               .select("*")
               .eq("alumno_id", data.id)
+              .eq("ciclo_escolar", cycle)
               .order("fecha_pago", { ascending: false }),
             supabase
               .from("configuracion_costos")
@@ -78,13 +87,51 @@ export default function StudentDashboardPage() {
               .eq("nivel", data.nivel)
               .eq("ciclo_escolar", cycle)
               .maybeSingle(),
+            supabase
+              .from("estado_cuenta")
+              .select("*")
+              .eq("alumno_id", data.id),
+            supabase
+              .from("alumnos_becas")
+              .select("porcentaje_aplicado, alcance_aplicado, becas!inner(nombre)")
+              .eq("alumno_id", data.id)
+              .eq("ciclo_escolar", cycle)
+              .maybeSingle(),
           ]);
 
           if (paymentsResult.error) throw paymentsResult.error;
           if (configurationResult.error) throw configurationResult.error;
+          if (accountResult.error) throw accountResult.error;
+          if (scholarshipResult.error) throw scholarshipResult.error;
           if (isMounted) {
             setPayments(paymentsResult.data);
             setConfiguration(configurationResult.data);
+            setScholarship(scholarshipResult.data as unknown as AppliedScholarship | null);
+            const charges = accountResult.data as EstadoCuenta[];
+            const overdueMonthlyBalance = charges
+              .filter(
+                (charge) =>
+                  charge.tipo_pago === "mensualidad" &&
+                  charge.estatus === "vencido",
+              )
+              .reduce(
+                (total, charge) =>
+                  total + Math.max(charge.monto_esperado - charge.monto_pagado, 0),
+                0,
+              );
+            const enrollmentCharges = charges.filter(
+              (charge) => charge.tipo_pago === "inscripcion",
+            );
+            const pendingEnrollmentBalance = enrollmentCharges.length > 0
+              ? enrollmentCharges.reduce(
+                  (total, charge) =>
+                    total + Math.max(charge.monto_esperado - charge.monto_pagado, 0),
+                  0,
+                )
+              : data.deuda_inscripcion;
+            setOverdueBalance(
+              overdueMonthlyBalance + pendingEnrollmentBalance,
+            );
           }
         } catch (paymentsCaughtError) {
           if (isMounted) {
@@ -143,6 +190,9 @@ export default function StudentDashboardPage() {
   }
 
   const currentMonthIndex = getCurrentAcademicMonthIndex(currentDate);
+  const effectiveMonthlyCost = configuration
+    ? getDiscountedCost(configuration.costo_mensualidad, scholarship, "mensualidad")
+    : 0;
   const monthlyStatuses = ACADEMIC_MONTHS.map((month, index) => {
     const year = getAcademicMonthYear(month.value, cycle);
     const paidAmount = payments
@@ -160,13 +210,13 @@ export default function StudentDashboardPage() {
       year,
       paidAmount,
       pendingAmount: configuration
-        ? Math.max(configuration.costo_mensualidad - paidAmount, 0)
+        ? Math.max(effectiveMonthlyCost - paidAmount, 0)
         : 0,
       isCurrent: index === currentMonthIndex,
       isDue: index <= currentMonthIndex,
       isPaid:
         configuration !== null &&
-        paidAmount >= configuration.costo_mensualidad,
+        paidAmount >= effectiveMonthlyCost,
     };
   });
   const currentMonth = monthlyStatuses[currentMonthIndex];
@@ -177,7 +227,7 @@ export default function StudentDashboardPage() {
     : 0;
   const accountStatusReady =
     !isPaymentsLoading && !paymentsError && configuration !== null;
-  const isAccountCurrent = accountStatusReady && accruedMonthlyDebt < 0.01;
+  const hasOverdueBalance = accountStatusReady && overdueBalance >= 0.01;
 
   return (
     <section className="mx-auto max-w-5xl">
@@ -201,6 +251,15 @@ export default function StudentDashboardPage() {
           Consulta tu información académica y tus saldos pendientes.
         </p>
       </div>
+
+      {student.estado === "pausa" && student.pausa_automatica_inscripcion && (
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+          <p className="font-semibold">Inscripción pendiente fuera de plazo</p>
+          <p className="mt-1 leading-6">
+            Tu cuenta se encuentra en pausa porque venció la fecha límite de inscripción. Comunícate con administración para liquidar el saldo y reactivar automáticamente tu estatus.
+          </p>
+        </div>
+      )}
 
       <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 className="text-lg font-semibold text-slate-950">
@@ -265,7 +324,7 @@ export default function StudentDashboardPage() {
               <p className="text-sm font-semibold text-slate-500">
                 Calculando estado...
               </p>
-            ) : isAccountCurrent ? (
+            ) : !hasOverdueBalance ? (
               <div className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-600/20">
                 Estado: Al corriente
               </div>
@@ -275,7 +334,7 @@ export default function StudentDashboardPage() {
                   Saldo vencido
                 </p>
                 <p className="mt-0.5 text-lg font-bold tabular-nums">
-                  {currencyFormatter.format(accruedMonthlyDebt)}
+                  {currencyFormatter.format(overdueBalance)}
                 </p>
               </div>
             )}
@@ -285,28 +344,28 @@ export default function StudentDashboardPage() {
         {accountStatusReady && (
           <div
             className={`mt-5 rounded-xl border p-5 ${
-              isAccountCurrent
+              !hasOverdueBalance
                 ? "border-emerald-200 bg-emerald-50"
                 : "border-amber-200 bg-amber-50"
             }`}
           >
             <p
               className={`text-lg font-bold ${
-                isAccountCurrent ? "text-emerald-900" : "text-amber-900"
+                !hasOverdueBalance ? "text-emerald-900" : "text-amber-900"
               }`}
             >
-              {isAccountCurrent
+              {!hasOverdueBalance
                 ? "¡Estás al corriente!"
                 : "Tienes pagos pendientes"}
             </p>
             <p
               className={`mt-1 text-sm ${
-                isAccountCurrent ? "text-emerald-700" : "text-amber-800"
+                !hasOverdueBalance ? "text-emerald-700" : "text-amber-800"
               }`}
             >
-              {isAccountCurrent
+              {!hasOverdueBalance
                 ? `Tus mensualidades están cubiertas hasta ${currentMonth.label} ${currentMonth.year}.`
-                : `Adeudo acumulado hasta ${currentMonth.label} ${currentMonth.year}: ${currencyFormatter.format(accruedMonthlyDebt)}.`}
+                : `Saldo vencido más inscripción pendiente: ${currencyFormatter.format(overdueBalance)}.`}
             </p>
           </div>
         )}
@@ -333,11 +392,28 @@ export default function StudentDashboardPage() {
             <p className="mt-2 text-3xl font-bold text-sky-950">{cycle}</p>
             <p className="mt-2 text-xs text-sky-700">
               {configuration
-                ? `Mensualidad: ${currencyFormatter.format(configuration.costo_mensualidad)}`
+                ? `Mensualidad: ${currencyFormatter.format(effectiveMonthlyCost)}`
                 : "Costos pendientes de configuración"}
             </p>
+            {configuration && (
+              <p className="mt-1 text-xs text-sky-700">
+                Límite de inscripción: {new Intl.DateTimeFormat("es-MX", {
+                  day: "2-digit",
+                  month: "long",
+                  year: "numeric",
+                  timeZone: "UTC",
+                }).format(new Date(`${configuration.fecha_limite_inscripcion}T12:00:00Z`))}
+              </p>
+            )}
           </article>
         </div>
+        {scholarship && (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+            <p className="text-sm font-medium text-emerald-800">Beca aplicada</p>
+            <p className="mt-1 text-lg font-bold text-emerald-950">{scholarship.becas.nombre} · {Number(scholarship.porcentaje_aplicado).toFixed(2)}%</p>
+            <p className="mt-1 text-xs text-emerald-700">Aplica a {getScholarshipScopeLabel(scholarship.alcance_aplicado).toLocaleLowerCase("es-MX")} durante el ciclo {cycle}.</p>
+          </div>
+        )}
       </div>
 
       <section className="mt-8">
@@ -406,9 +482,7 @@ export default function StudentDashboardPage() {
       </section>
 
       <PaymentHistory
-        payments={payments}
-        isLoading={isPaymentsLoading}
-        error={paymentsError}
+        studentId={student.id}
       />
     </section>
   );

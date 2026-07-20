@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Archive,
@@ -27,10 +27,11 @@ import { TableSkeletonRows } from "@/components/TableSkeletonRows";
 import { getFullStudentName } from "@/lib/academic";
 import {
   invalidateAdminData,
+  loadStudentFilterOptions,
   loadStudents,
   type StudentListItem,
 } from "@/lib/admin-data";
-import type { EstadoAlumno } from "@/types/database";
+import type { EstadoAlumno, StudentFilterOptions } from "@/types/database";
 
 const PAGE_SIZE = 10;
 
@@ -64,13 +65,6 @@ const statusPresentation: Record<
 
 const selectClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-700 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
-
-function normalizeSearch(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase("es-MX");
-}
 
 function SortableHeading({
   label,
@@ -111,12 +105,19 @@ export default function StudentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [levelFilter, setLevelFilter] = useState("todos");
   const [gradeFilter, setGradeFilter] = useState("todos");
   const [groupFilter, setGroupFilter] = useState("todos");
+  const [statusFilter, setStatusFilter] = useState("todos");
   const [sortKey, setSortKey] = useState<SortKey>("nombre");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalStudents, setTotalStudents] = useState(0);
+  const [filterOptions, setFilterOptions] = useState<StudentFilterOptions>({
+    grados: [],
+    grupos: [],
+  });
   const [paymentStudent, setPaymentStudent] =
     useState<StudentListItem | null>(null);
   const [drawer, setDrawer] = useState<DrawerState>(null);
@@ -126,8 +127,19 @@ export default function StudentsPage() {
     if (showLoading) setIsLoading(true);
     setError(null);
     try {
-      const data = await loadStudents();
-      setStudents(data);
+      const data = await loadStudents({
+        page: currentPage,
+        pageSize: PAGE_SIZE,
+        search: debouncedSearch,
+        level: levelFilter,
+        grade: gradeFilter,
+        group: groupFilter,
+        academicStatus: statusFilter,
+        sortKey,
+        sortDirection,
+      });
+      setStudents(data.students);
+      setTotalStudents(data.total);
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -137,11 +149,28 @@ export default function StudentsPage() {
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  }, []);
+  }, [currentPage, debouncedSearch, gradeFilter, groupFilter, levelFilter, sortDirection, sortKey, statusFilter]);
 
   useEffect(() => {
     void refetchStudents(true);
   }, [refetchStudents]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearch(search), 300);
+    return () => window.clearTimeout(timeout);
+  }, [search]);
+
+  useEffect(() => {
+    let mounted = true;
+    loadStudentFilterOptions()
+      .then((options) => {
+        if (mounted) setFilterOptions(options);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -155,72 +184,14 @@ export default function StudentsPage() {
     setToast(message);
   }
 
-  const availableGrades = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          students
-            .filter((student) => levelFilter === "todos" || student.nivel === levelFilter)
-            .map((student) => student.grado),
-        ),
-      ).sort((a, b) => a - b),
-    [levelFilter, students],
+  const availableGrades = filterOptions.grados.filter((grade) =>
+    levelFilter === "primaria" ? grade <= 6 : grade <= 3,
   );
-
-  const availableGroups = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          students
-            .filter(
-              (student) =>
-                (levelFilter === "todos" || student.nivel === levelFilter) &&
-                (gradeFilter === "todos" || student.grado === Number(gradeFilter)),
-            )
-            .map((student) => student.grupo),
-        ),
-      ).sort((a, b) => a.localeCompare(b, "es")),
-    [gradeFilter, levelFilter, students],
-  );
-
-  const filteredStudents = useMemo(() => {
-    const normalizedQuery = normalizeSearch(search.trim());
-    const matches = students.filter((student) => {
-      const searchableText = normalizeSearch(
-        `${student.nombre} ${student.apellido_paterno} ${student.apellido_materno} ${student.matricula}`,
-      );
-
-      return (
-        (!normalizedQuery || searchableText.includes(normalizedQuery)) &&
-        (levelFilter === "todos" || student.nivel === levelFilter) &&
-        (gradeFilter === "todos" || student.grado === Number(gradeFilter)) &&
-        (groupFilter === "todos" || student.grupo === groupFilter)
-      );
-    });
-
-    return matches.sort((first, second) => {
-      let comparison = 0;
-      if (sortKey === "matricula") {
-        comparison = first.matricula.localeCompare(second.matricula, "es", { numeric: true });
-      } else if (sortKey === "nombre") {
-        comparison = getFullStudentName(first).localeCompare(getFullStudentName(second), "es");
-      } else if (sortKey === "trayectoria") {
-        comparison = `${first.nivel}-${first.grado}-${first.grupo}`.localeCompare(
-          `${second.nivel}-${second.grado}-${second.grupo}`,
-          "es",
-          { numeric: true },
-        );
-      } else {
-        comparison = first.estado.localeCompare(second.estado, "es");
-      }
-      return sortDirection === "asc" ? comparison : -comparison;
-    });
-  }, [gradeFilter, groupFilter, levelFilter, search, sortDirection, sortKey, students]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+  const availableGroups = filterOptions.grupos;
+  const totalPages = Math.max(1, Math.ceil(totalStudents / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
-  const visibleStudents = filteredStudents.slice(startIndex, startIndex + PAGE_SIZE);
+  const visibleStudents = students;
 
   function resetPage() {
     setCurrentPage(1);
@@ -257,7 +228,7 @@ export default function StudentsPage() {
           <input id="student-search" type="search" value={search} onChange={(event) => { setSearch(event.target.value); resetPage(); }} placeholder="Buscar por nombre, apellido o matrícula..." className="w-full rounded-xl border border-slate-300 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-100" />
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nivel
             <select value={levelFilter} onChange={(event) => { setLevelFilter(event.target.value); setGradeFilter("todos"); setGroupFilter("todos"); resetPage(); }} className={`mt-2 ${selectClass}`}>
               <option value="todos">Todos los niveles</option>
@@ -276,6 +247,14 @@ export default function StudentsPage() {
             <select value={groupFilter} onChange={(event) => { setGroupFilter(event.target.value); resetPage(); }} className={`mt-2 ${selectClass}`}>
               <option value="todos">Todos los grupos</option>
               {availableGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+            </select>
+          </label>
+          <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Estado académico
+            <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); resetPage(); }} className={`mt-2 ${selectClass}`}>
+              <option value="todos">Todos los estados</option>
+              <option value="activo">Activo</option>
+              <option value="pausa">Pausa temporal</option>
+              <option value="baja">Baja definitiva</option>
             </select>
           </label>
         </div>
@@ -320,7 +299,7 @@ export default function StudentsPage() {
                     <td className="whitespace-nowrap px-5 py-4 text-right">
                       <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
                         <Link href={`/dashboard/admin/alumnos/${student.id}`} title="Ver perfil completo" aria-label={`Ver perfil de ${fullName}`} className="rounded-md p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"><Eye className="h-4 w-4" aria-hidden="true" /></Link>
-                        <button type="button" onClick={() => setPaymentStudent(student)} title="Registrar pago rápido" aria-label={`Registrar pago para ${fullName}`} className="rounded-md p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"><CircleDollarSign className="h-4 w-4" aria-hidden="true" /></button>
+                        <button type="button" onClick={() => setPaymentStudent(student)} disabled={student.estado !== "activo"} title={student.estado === "activo" ? "Registrar pago rápido" : "Los pagos están bloqueados para alumnos inactivos"} aria-label={`Registrar pago para ${fullName}`} className="rounded-md p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-30"><CircleDollarSign className="h-4 w-4" aria-hidden="true" /></button>
                         <button type="button" onClick={() => setDrawer({ mode: "edit", student })} title="Editar información" aria-label={`Editar información de ${fullName}`} className="rounded-md p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"><Pencil className="h-4 w-4" aria-hidden="true" /></button>
                       </div>
                     </td>
@@ -332,7 +311,7 @@ export default function StudentsPage() {
         </div>
 
         <footer className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <p>{filteredStudents.length === 0 ? "Mostrando 0 alumnos" : `Mostrando ${startIndex + 1}-${Math.min(startIndex + PAGE_SIZE, filteredStudents.length)} de ${filteredStudents.length} alumnos`}</p>
+          <p>{totalStudents === 0 ? "Mostrando 0 alumnos" : `Mostrando ${startIndex + 1}-${Math.min(startIndex + visibleStudents.length, totalStudents)} de ${totalStudents} alumnos`}</p>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={safePage === 1 || isLoading} aria-label="Página anterior" className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"><ChevronLeft className="h-4 w-4" aria-hidden="true" />Anterior</button>
             <span className="min-w-20 text-center text-xs font-medium text-slate-500">{safePage} de {totalPages}</span>

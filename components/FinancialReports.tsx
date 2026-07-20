@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Bell,
   ChartNoAxesCombined,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Download,
   TriangleAlert,
@@ -12,18 +14,22 @@ import {
 import { TableSkeletonRows } from "@/components/TableSkeletonRows";
 import { getFullStudentName } from "@/lib/academic";
 import {
-  loadFinancialReportData,
+  loadFinancialReportKpis,
+  loadFinancialReportPage,
+  loadStudentFilterOptions,
   type FinancialAccountRow,
 } from "@/lib/admin-data";
 import type {
   EstatusCobro,
   FinancialReportKpis,
+  StudentFilterOptions,
   TipoPago,
 } from "@/types/database";
 
 type FinancialRow = FinancialAccountRow;
 
 type ActiveTab = "resumen" | "vencidos" | "estado-cuenta";
+const PAGE_SIZE = 10;
 
 const EMPTY_KPIS: FinancialReportKpis = {
   total_recaudado: 0,
@@ -87,6 +93,9 @@ export function FinancialReports() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [filterOptions, setFilterOptions] = useState<StudentFilterOptions>({ grados: [], grupos: [] });
 
   useEffect(() => {
     let isMounted = true;
@@ -96,11 +105,23 @@ export function FinancialReports() {
       setError(null);
 
       try {
-        const data = await loadFinancialReportData();
+        const [pageData, kpiData] = await Promise.all([
+          loadFinancialReportPage({
+            page,
+            pageSize: PAGE_SIZE,
+            level: levelFilter,
+            grade: gradeFilter,
+            group: groupFilter,
+            paymentType: paymentFilter,
+            overdueOnly: activeTab === "vencidos",
+          }),
+          loadFinancialReportKpis(),
+        ]);
 
         if (isMounted) {
-          setRows(data.rows);
-          setKpis(data.kpis);
+          setRows(pageData.rows);
+          setTotal(pageData.total);
+          setKpis(kpiData);
         }
       } catch (caughtError) {
         if (isMounted) {
@@ -120,75 +141,18 @@ export function FinancialReports() {
     return () => {
       isMounted = false;
     };
+  }, [activeTab, gradeFilter, groupFilter, levelFilter, page, paymentFilter]);
+
+  useEffect(() => {
+    loadStudentFilterOptions().then(setFilterOptions).catch(() => undefined);
   }, []);
 
-  const levels = useMemo(
-    () =>
-      Array.from(new Set(rows.map((row) => row.alumnos.nivel))).sort((a, b) =>
-        a.localeCompare(b, "es"),
-      ),
-    [rows],
+  const levels = ["primaria", "secundaria", "bachillerato"];
+  const grades = filterOptions.grados.filter((grade) =>
+    levelFilter === "primaria" ? grade <= 6 : grade <= 3,
   );
-
-  const grades = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          rows
-            .filter(
-              (row) =>
-                levelFilter === "todos" ||
-                row.alumnos.nivel === levelFilter,
-            )
-            .map((row) => row.alumnos.grado),
-        ),
-      ).sort((a, b) => a - b),
-    [levelFilter, rows],
-  );
-
-  const groups = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          rows
-            .filter(
-              (row) =>
-                (levelFilter === "todos" ||
-                  row.alumnos.nivel === levelFilter) &&
-                (gradeFilter === "todos" ||
-                  row.alumnos.grado === Number(gradeFilter)),
-            )
-            .map((row) => row.alumnos.grupo),
-        ),
-      ).sort((a, b) => a.localeCompare(b, "es")),
-    [gradeFilter, levelFilter, rows],
-  );
-
-  const filteredRows = useMemo(
-    () =>
-      rows.filter((row) => {
-        const matchesFilters =
-          (levelFilter === "todos" ||
-            row.alumnos.nivel === levelFilter) &&
-          (gradeFilter === "todos" ||
-            row.alumnos.grado === Number(gradeFilter)) &&
-          (groupFilter === "todos" ||
-            row.alumnos.grupo === groupFilter) &&
-          (paymentFilter === "todos" || row.tipo_pago === paymentFilter);
-
-        if (!matchesFilters) return false;
-        if (activeTab === "vencidos") return row.estatus === "vencido";
-        return true;
-      }),
-    [
-      activeTab,
-      gradeFilter,
-      groupFilter,
-      levelFilter,
-      paymentFilter,
-      rows,
-    ],
-  );
+  const groups = filterOptions.grupos;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   function exportToCsv() {
     const headers = [
@@ -205,7 +169,7 @@ export function FinancialReports() {
       "Saldo vencido",
     ];
 
-    const csvRows = filteredRows.map((row) => {
+    const csvRows = rows.map((row) => {
       const isOverdue =
         row.estatus !== "pagado" && parseDate(row.fecha_limite) < new Date();
       const overdueBalance = isOverdue
@@ -309,7 +273,7 @@ export function FinancialReports() {
         <button
           type="button"
           onClick={exportToCsv}
-          disabled={isLoading || filteredRows.length === 0}
+          disabled={isLoading || rows.length === 0}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Download className="h-4 w-4" aria-hidden="true" />
@@ -355,7 +319,7 @@ export function FinancialReports() {
               type="button"
               role="tab"
               aria-selected={activeTab === tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => { setActiveTab(tab.id); setPage(1); }}
               className={`border-b-2 px-1 pb-3 text-sm font-semibold transition ${
                 activeTab === tab.id
                   ? "border-sky-600 text-sky-700"
@@ -377,6 +341,7 @@ export function FinancialReports() {
               setLevelFilter(event.target.value);
               setGradeFilter("todos");
               setGroupFilter("todos");
+              setPage(1);
             }}
             className={selectClass}
           >
@@ -395,6 +360,7 @@ export function FinancialReports() {
             onChange={(event) => {
               setGradeFilter(event.target.value);
               setGroupFilter("todos");
+              setPage(1);
             }}
             className={selectClass}
           >
@@ -406,7 +372,7 @@ export function FinancialReports() {
         </label>
         <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
           Grupo
-          <select value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)} className={selectClass}>
+          <select value={groupFilter} onChange={(event) => { setGroupFilter(event.target.value); setPage(1); }} className={selectClass}>
             <option value="todos">Todos los grupos</option>
             {groups.map((group) => (
               <option key={group} value={group}>{group}</option>
@@ -415,7 +381,7 @@ export function FinancialReports() {
         </label>
         <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
           Tipo de pago
-          <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value as TipoPago | "todos")} className={selectClass}>
+          <select value={paymentFilter} onChange={(event) => { setPaymentFilter(event.target.value as TipoPago | "todos"); setPage(1); }} className={selectClass}>
             <option value="todos">Todos los tipos</option>
             <option value="inscripcion">Inscripción</option>
             <option value="mensualidad">Mensualidad</option>
@@ -439,14 +405,14 @@ export function FinancialReports() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading && <TableSkeletonRows columns={7} label="Cargando estados de cuenta..." />}
-              {!isLoading && !error && filteredRows.length === 0 && (
+              {!isLoading && !error && rows.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-500">
                     No hay cargos que coincidan con los filtros seleccionados.
                   </td>
                 </tr>
               )}
-              {!isLoading && !error && filteredRows.map((row) => {
+              {!isLoading && !error && rows.map((row) => {
                 const isOverdue = row.estatus !== "pagado" && parseDate(row.fecha_limite) < new Date();
                 const overdueBalance = isOverdue ? Math.max(row.monto_esperado - row.monto_pagado, 0) : 0;
                 const canRemind = row.estatus === "vencido" || row.estatus === "parcial";
@@ -476,6 +442,14 @@ export function FinancialReports() {
             </tbody>
           </table>
         </div>
+        <footer className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <p>{total === 0 ? "Mostrando 0 cargos" : `Mostrando ${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, total)} de ${total} cargos`}</p>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1 || isLoading} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 font-medium text-slate-700 disabled:opacity-40"><ChevronLeft className="h-4 w-4" />Anterior</button>
+            <span className="min-w-16 text-center text-xs">{page} de {totalPages}</span>
+            <button type="button" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages || isLoading} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 font-medium text-slate-700 disabled:opacity-40">Siguiente<ChevronRight className="h-4 w-4" /></button>
+          </div>
+        </footer>
       </div>
     </section>
   );
