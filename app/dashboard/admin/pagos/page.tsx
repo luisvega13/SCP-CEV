@@ -2,23 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { TableSkeletonRows } from "@/components/TableSkeletonRows";
 import { getFullStudentName } from "@/lib/academic";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-import type { Alumno, Pago } from "@/types/database";
-
-type RecentPayment = Pick<
-  Pago,
-  "id" | "monto" | "tipo_pago" | "fecha_pago" | "mes" | "anio"
-> & {
-  alumnos: Pick<
-    Alumno,
-    | "id"
-    | "nombre"
-    | "apellido_paterno"
-    | "apellido_materno"
-    | "matricula"
-  >;
-};
+import { getPaymentMethodLabel } from "@/lib/payments";
+import {
+  loadRecentPayments as fetchRecentPayments,
+  type RecentPayment,
+} from "@/lib/admin-data";
 
 const currencyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
@@ -41,16 +31,7 @@ export default function PaymentsPage() {
 
     async function loadRecentPayments() {
       try {
-        const supabase = getSupabaseBrowserClient();
-        const { data, error: queryError } = await supabase
-          .from("pagos")
-          .select(
-            "id, monto, tipo_pago, fecha_pago, mes, anio, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, matricula)",
-          )
-          .order("fecha_pago", { ascending: false })
-          .limit(20);
-
-        if (queryError) throw queryError;
+        const data = await fetchRecentPayments();
         if (isMounted) setPayments(data);
       } catch (caughtError) {
         if (isMounted) {
@@ -98,7 +79,7 @@ export default function PaymentsPage() {
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
-                {["Fecha y hora", "Alumno", "Matrícula", "Tipo", "Periodo"].map(
+                {["Fecha y hora", "Alumno", "Matrícula", "Tipo", "Periodo", "Método"].map(
                   (heading) => (
                     <th
                       key={heading}
@@ -122,19 +103,15 @@ export default function PaymentsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-12 text-center text-sm text-slate-500"
-                  >
-                    Cargando movimientos...
-                  </td>
-                </tr>
+                <TableSkeletonRows
+                  columns={8}
+                  label="Cargando movimientos..."
+                />
               )}
               {!isLoading && !error && payments.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-6 py-12 text-center text-sm text-slate-500"
                   >
                     Todavía no se han registrado pagos.
@@ -159,6 +136,9 @@ export default function PaymentsPage() {
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm capitalize text-slate-600">
                       {payment.mes} {payment.anio}
+                    </td>
+                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600">
+                      {getPaymentMethodLabel(payment.metodo_pago)}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-semibold tabular-nums text-slate-900">
                       {currencyFormatter.format(payment.monto)}

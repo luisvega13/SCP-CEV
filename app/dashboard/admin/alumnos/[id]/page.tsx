@@ -3,18 +3,29 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PaymentHistory } from "@/components/PaymentHistory";
+import { invalidateAdminData } from "@/lib/admin-data";
 import {
   ACADEMIC_MONTHS,
   getAcademicMonthYear,
   getCurrentAcademicCycle,
   getFullStudentName,
+  getReEnrollmentLevel,
 } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { PAYMENT_METHOD_OPTIONS } from "@/lib/payments";
+import {
+  getDiscountedCost,
+  getScholarshipScopeLabel,
+  scholarshipAppliesTo,
+  type AppliedScholarship,
+} from "@/lib/scholarships";
 import type {
   Alumno,
   ConfiguracionCostos,
+  MetodoPago,
   Pago,
 } from "@/types/database";
 
@@ -39,24 +50,35 @@ function getErrorMessage(caughtError: unknown, fallback: string) {
   return fallback;
 }
 
+function createAcademicCycle(startYear: number) {
+  return `${startYear}-${startYear + 1}`;
+}
+
 export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const studentId = params.id;
+  const currentAcademicCycle = getCurrentAcademicCycle();
   const [student, setStudent] = useState<Alumno | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
-  const [cycle, setCycle] = useState(getCurrentAcademicCycle);
+  const [paymentMethod, setPaymentMethod] = useState<MetodoPago>("efectivo");
+  const [cycle, setCycle] = useState(currentAcademicCycle);
   const [configuration, setConfiguration] =
     useState<ConfiguracionCostos | null>(null);
   const [configurationError, setConfigurationError] = useState("");
+  const [scholarship, setScholarship] = useState<AppliedScholarship | null>(null);
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [payments, setPayments] = useState<Pago[]>([]);
   const [isPaymentsLoading, setIsPaymentsLoading] = useState(true);
+  const [paymentDataVersion, setPaymentDataVersion] = useState(0);
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(
+    () => searchParams.get("editar") === "1",
+  );
   const [editName, setEditName] = useState("");
   const [editPaternalSurname, setEditPaternalSurname] = useState("");
   const [editMaternalSurname, setEditMaternalSurname] = useState("");
@@ -114,6 +136,7 @@ export default function StudentDetailPage() {
           .from("pagos")
           .select("*")
           .eq("alumno_id", studentId)
+          .eq("ciclo_escolar", cycle)
           .order("fecha_pago", { ascending: false });
 
         if (queryError) throw queryError;
@@ -137,34 +160,50 @@ export default function StudentDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [studentId]);
+  }, [cycle, paymentDataVersion, studentId]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadConfiguration() {
       if (!student) return;
+      const billingLevel = getReEnrollmentLevel(student, cycle);
 
       const supabase = getSupabaseBrowserClient();
-      const { data, error: queryError } = await supabase
-        .from("configuracion_costos")
-        .select("*")
-        .eq("nivel", student.nivel)
-        .eq("ciclo_escolar", cycle)
-        .maybeSingle();
+      const [configurationResult, scholarshipResult] = await Promise.all([
+        supabase
+          .from("configuracion_costos")
+          .select("*")
+          .eq("nivel", billingLevel)
+          .eq("ciclo_escolar", cycle)
+          .maybeSingle(),
+        supabase
+          .from("alumnos_becas")
+          .select("porcentaje_aplicado, alcance_aplicado, becas!inner(nombre)")
+          .eq("alumno_id", student.id)
+          .eq("ciclo_escolar", cycle)
+          .maybeSingle(),
+      ]);
 
       if (!isMounted) return;
 
-      if (queryError) {
-        setConfigurationError(queryError.message);
+      if (scholarshipResult.error) {
+        setConfigurationError(scholarshipResult.error.message);
+        setScholarship(null);
+        return;
+      }
+      setScholarship(scholarshipResult.data as unknown as AppliedScholarship | null);
+
+      if (configurationResult.error) {
+        setConfigurationError(configurationResult.error.message);
         setConfiguration(null);
-      } else if (!data) {
+      } else if (!configurationResult.data) {
         setConfigurationError(
-          `No hay costos configurados para ${student.nivel} en ${cycle}.`,
+          `No hay costos configurados para ${billingLevel} en ${cycle}.`,
         );
         setConfiguration(null);
       } else {
-        setConfiguration(data);
+        setConfiguration(configurationResult.data);
         setConfigurationError("");
       }
     }
@@ -174,6 +213,28 @@ export default function StudentDetailPage() {
       isMounted = false;
     };
   }, [cycle, student]);
+
+  function moveCycle(direction: -1 | 1) {
+    const startYear = Number(cycle.split("-")[0]);
+    setCycle(createAcademicCycle(startYear + direction));
+    setPayments([]);
+    setIsPaymentsLoading(true);
+    setPaymentsError("");
+    setConfiguration(null);
+    setScholarship(null);
+    setConfigurationError("");
+    setFormError("");
+    setSuccessMessage("");
+    setAmount("");
+  }
+
+  function handlePaymentUpdated() {
+    invalidateAdminData("dashboard:");
+    invalidateAdminData("payments:");
+    invalidateAdminData("reports:");
+    setIsPaymentsLoading(true);
+    setPaymentDataVersion((current) => current + 1);
+  }
 
   function beginEditing() {
     if (!student) return;
@@ -240,6 +301,8 @@ export default function StudentDetailPage() {
 
       if (updateError) throw updateError;
 
+      invalidateAdminData("students:");
+      invalidateAdminData("reports:");
       setStudent(data);
       setIsEditing(false);
       setProfileMessage("La información académica se actualizó correctamente.");
@@ -254,11 +317,9 @@ export default function StudentDetailPage() {
     }
   }
 
-  async function handleStatusChange() {
+  async function handleStatusChange(nextStatus: Alumno["estado"]) {
     if (!student) return;
-
-    const nextStatus: Alumno["estado"] =
-      student.estado === "activo" ? "baja" : "activo";
+    if (nextStatus === student.estado) return;
 
     setProfileError("");
     setProfileMessage("");
@@ -275,12 +336,16 @@ export default function StudentDetailPage() {
 
       if (updateError) throw updateError;
 
+      invalidateAdminData("students:");
+      invalidateAdminData("dashboard:");
+      invalidateAdminData("reports:");
       setStudent(data);
-      setProfileMessage(
-        nextStatus === "activo"
-          ? "El alumno fue reactivado correctamente."
-          : "El alumno fue dado de baja correctamente.",
-      );
+      const statusMessages: Record<Alumno["estado"], string> = {
+        activo: "El alumno fue reactivado correctamente.",
+        pausa: "El alumno quedó en pausa temporal.",
+        baja: "El alumno fue dado de baja correctamente.",
+      };
+      setProfileMessage(statusMessages[nextStatus]);
     } catch (caughtError) {
       setProfileError(
         caughtError instanceof Error
@@ -329,12 +394,16 @@ export default function StudentDetailPage() {
         alumno_id: studentId,
         monto: numericAmount,
         tipo_pago: activePaymentType,
+        metodo_pago: paymentMethod,
         mes: activeMonth,
         anio: activeYear,
       });
 
       if (insertError) throw insertError;
 
+      invalidateAdminData("payments:");
+      invalidateAdminData("dashboard:");
+      invalidateAdminData("reports:");
       setIsPaymentsLoading(true);
       const [studentResult, paymentsResult] = await Promise.all([
         supabase.from("alumnos").select("*").eq("id", studentId).single(),
@@ -342,6 +411,7 @@ export default function StudentDetailPage() {
           .from("pagos")
           .select("*")
           .eq("alumno_id", studentId)
+          .eq("ciclo_escolar", cycle)
           .order("fecha_pago", { ascending: false }),
       ]);
 
@@ -374,7 +444,18 @@ export default function StudentDetailPage() {
   }
 
   if (isLoading) {
-    return <p className="py-12 text-center text-sm text-slate-500">Cargando alumno...</p>;
+    return (
+      <section className="mx-auto max-w-5xl animate-pulse" role="status">
+        <div className="h-4 w-28 rounded bg-slate-200" />
+        <div className="mt-5 h-9 w-80 max-w-full rounded bg-slate-200" />
+        <div className="mt-8 grid gap-4 sm:grid-cols-2">
+          <div className="h-36 rounded-xl bg-white shadow-sm ring-1 ring-slate-200" />
+          <div className="h-36 rounded-xl bg-white shadow-sm ring-1 ring-slate-200" />
+        </div>
+        <div className="mt-8 h-60 rounded-xl bg-white shadow-sm ring-1 ring-slate-200" />
+        <span className="sr-only">Cargando información del alumno...</span>
+      </section>
+    );
   }
 
   if (error || !student) {
@@ -389,6 +470,12 @@ export default function StudentDetailPage() {
     );
   }
 
+  const effectiveEnrollmentCost = configuration
+    ? getDiscountedCost(configuration.costo_inscripcion, scholarship, "inscripcion")
+    : 0;
+  const effectiveMonthlyCost = configuration
+    ? getDiscountedCost(configuration.costo_mensualidad, scholarship, "mensualidad")
+    : 0;
   const monthlyStatuses = ACADEMIC_MONTHS.map((academicMonth) => {
     const year = getAcademicMonthYear(academicMonth.value, cycle);
     const paidAmount = payments
@@ -406,7 +493,7 @@ export default function StudentDetailPage() {
       paidAmount,
       isPaid:
         configuration !== null &&
-        paidAmount >= configuration.costo_mensualidad,
+        paidAmount >= effectiveMonthlyCost,
     };
   });
   const nextPendingMonth = monthlyStatuses.find((month) => !month.isPaid);
@@ -424,8 +511,8 @@ export default function StudentDetailPage() {
     : null;
   const activeCost = configuration
     ? isEnrollmentPending
-      ? configuration.costo_inscripcion
-      : configuration.costo_mensualidad
+      ? effectiveEnrollmentCost
+      : effectiveMonthlyCost
     : 0;
   const activePaidAmount = isEnrollmentPending
     ? Math.max(activeCost - student.deuda_inscripcion, 0)
@@ -436,6 +523,11 @@ export default function StudentDetailPage() {
     : nextPendingMonth
       ? `Mensualidad ${nextPendingMonth.label} ${nextPendingMonth.year}`
       : "Ciclo escolar liquidado";
+  const canRegisterPayment =
+    student.estado === "activo" ||
+    (student.estado === "pausa" &&
+      student.pausa_automatica_inscripcion &&
+      activePaymentType === "inscripcion");
 
   return (
     <section className="mx-auto max-w-5xl">
@@ -450,13 +542,7 @@ export default function StudentDetailPage() {
             <h1 className="text-3xl font-bold text-slate-950">
               {getFullStudentName(student)}
             </h1>
-            <span
-              className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${
-                student.estado === "activo"
-                  ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20"
-                  : "bg-red-50 text-red-700 ring-red-600/20"
-              }`}
-            >
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize text-slate-600 ring-1 ring-inset ring-slate-300">
               {student.estado}
             </span>
           </div>
@@ -474,22 +560,18 @@ export default function StudentDetailPage() {
               Editar información
             </button>
           )}
-          <button
-            type="button"
-            onClick={handleStatusChange}
+          <label className="sr-only" htmlFor="academic-status">Estado académico</label>
+          <select
+            id="academic-status"
+            value={student.estado}
             disabled={isUpdatingStatus}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-              student.estado === "activo"
-                ? "bg-red-600 hover:bg-red-700"
-                : "bg-emerald-600 hover:bg-emerald-700"
-            }`}
+            onChange={(event) => void handleStatusChange(event.target.value as Alumno["estado"])}
+            className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isUpdatingStatus
-              ? "Actualizando..."
-              : student.estado === "activo"
-                ? "Dar de baja"
-                : "Reactivar alumno"}
-          </button>
+            <option value="activo">Activo</option>
+            <option value="pausa">Pausa temporal</option>
+            <option value="baja">Baja definitiva</option>
+          </select>
         </div>
       </div>
 
@@ -513,6 +595,7 @@ export default function StudentDetailPage() {
 
       {isEditing && (
         <form
+          id="editar-informacion"
           onSubmit={handleUpdate}
           className="mt-8 grid gap-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-2"
         >
@@ -672,21 +755,68 @@ export default function StudentDetailPage() {
         </article>
         <article className="rounded-xl border border-sky-200 bg-sky-50 p-6">
           <p className="text-sm font-medium text-sky-800">Ciclo escolar</p>
-          <input
-            value={cycle}
-            onChange={(event) => setCycle(event.target.value)}
-            aria-label="Ciclo escolar"
-            className="mt-2 w-36 rounded-lg border border-sky-200 bg-white px-3 py-2 text-lg font-bold text-sky-950 outline-none focus:ring-2 focus:ring-sky-200"
-          />
+          <div
+            role="group"
+            aria-label="Navegación de ciclo escolar"
+            className="mt-2 inline-flex items-stretch overflow-hidden rounded-xl border border-sky-200 bg-white shadow-sm"
+          >
+            <button
+              type="button"
+              onClick={() => moveCycle(-1)}
+              disabled={isPaymentsLoading || isSaving}
+              aria-label="Ir al ciclo escolar anterior"
+              title="Ciclo anterior"
+              className="grid w-11 place-items-center border-r border-sky-100 text-sky-700 transition hover:bg-sky-100 focus:z-10 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+            </button>
+            <div className="min-w-36 px-4 py-2 text-center">
+              <p className="text-lg font-bold tabular-nums text-sky-950">
+                {cycle}
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-700">
+                {cycle === currentAcademicCycle ? "Ciclo actual" : "Agosto — Julio"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => moveCycle(1)}
+              disabled={isPaymentsLoading || isSaving}
+              aria-label="Ir al ciclo escolar siguiente"
+              title="Ciclo siguiente"
+              className="grid w-11 place-items-center border-l border-sky-100 text-sky-700 transition hover:bg-sky-100 focus:z-10 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ChevronRight className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
           <p className="mt-2 text-xs text-sky-700">
             {configuration
-              ? `Mensualidad: ${currencyFormatter.format(configuration.costo_mensualidad)}`
+              ? `Mensualidad: ${currencyFormatter.format(effectiveMonthlyCost)}`
               : configurationError}
           </p>
+          {configuration && (
+            <p className="mt-1 text-xs text-sky-700">
+              Límite de inscripción: {new Intl.DateTimeFormat("es-MX", {
+                day: "2-digit",
+                month: "long",
+                year: "numeric",
+                timeZone: "UTC",
+              }).format(new Date(`${configuration.fecha_limite_inscripcion}T12:00:00Z`))}
+            </p>
+          )}
         </article>
+        {scholarship && (
+          <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 sm:col-span-2">
+            <p className="text-sm font-medium text-emerald-800">Beca aplicada</p>
+            <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+              <div><p className="text-xl font-bold text-emerald-950">{scholarship.becas.nombre} · {Number(scholarship.porcentaje_aplicado).toFixed(2)}%</p><p className="mt-1 text-xs text-emerald-700">Aplica a {getScholarshipScopeLabel(scholarship.alcance_aplicado).toLocaleLowerCase("es-MX")} durante {cycle}.</p></div>
+              {configuration && <div className="text-right text-xs text-emerald-800">{scholarshipAppliesTo(scholarship, "inscripcion") && <p>Inscripción: <span className="line-through">{currencyFormatter.format(configuration.costo_inscripcion)}</span> <strong className="ml-1 no-underline">{currencyFormatter.format(effectiveEnrollmentCost)}</strong></p>}{scholarshipAppliesTo(scholarship, "mensualidad") && <p className="mt-1">Mensualidad: <span className="line-through">{currencyFormatter.format(configuration.costo_mensualidad)}</span> <strong className="ml-1 no-underline">{currencyFormatter.format(effectiveMonthlyCost)}</strong></p>}</div>}
+            </div>
+          </article>
+        )}
       </div>
 
-      <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+      <div id="registrar-pago" className="mt-8 scroll-mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div>
           <h2 className="text-xl font-semibold text-slate-950">Registrar pago</h2>
           <p className="mt-1 text-sm text-slate-500">
@@ -719,6 +849,17 @@ export default function StudentDetailPage() {
           </div>
 
           <div>
+            <label htmlFor="payment-method" className="block text-sm font-medium text-slate-700">
+              Método de pago
+            </label>
+            <select id="payment-method" required value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as MetodoPago)} className={fieldClass}>
+              {PAYMENT_METHOD_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-2">
             <p className="block text-sm font-medium text-slate-700">
               Concepto automático
             </p>
@@ -734,6 +875,17 @@ export default function StudentDetailPage() {
               )}
             </div>
           </div>
+
+          {student.estado === "pausa" && student.pausa_automatica_inscripcion && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:col-span-2">
+              El alumno está en pausa porque venció su inscripción. Puede liquidar únicamente la inscripción y será reactivado automáticamente al completar el pago.
+            </p>
+          )}
+          {!canRegisterPayment && (
+            <p className="rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-700 sm:col-span-2">
+              El registro de pagos está bloqueado por el estado académico actual del alumno.
+            </p>
+          )}
 
           {formError && (
             <p role="alert" className="text-sm text-red-600 sm:col-span-2">
@@ -754,7 +906,11 @@ export default function StudentDetailPage() {
             <button
               type="submit"
               disabled={
-                isSaving || !configuration || activePaymentType === null
+                isSaving ||
+                isPaymentsLoading ||
+                !configuration ||
+                activePaymentType === null ||
+                !canRegisterPayment
               }
               className="rounded-lg bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -774,6 +930,11 @@ export default function StudentDetailPage() {
             {currencyFormatter.format(student.deuda_mensualidad)}
           </p>
         </div>
+        {paymentsError && (
+          <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+            {paymentsError}
+          </p>
+        )}
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {monthlyStatuses.map((month) => (
             <article
@@ -791,9 +952,7 @@ export default function StudentDetailPage() {
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
                     Costo:{" "}
-                    {currencyFormatter.format(
-                      configuration?.costo_mensualidad ?? 0,
-                    )}
+                    {currencyFormatter.format(effectiveMonthlyCost)}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
                     Abonado: {currencyFormatter.format(month.paidAmount)}
@@ -815,9 +974,10 @@ export default function StudentDetailPage() {
       </section>
 
       <PaymentHistory
-        payments={payments}
-        isLoading={isPaymentsLoading}
-        error={paymentsError}
+        studentId={studentId}
+        refreshKey={payments.length}
+        editable
+        onPaymentUpdated={handlePaymentUpdated}
       />
     </section>
   );

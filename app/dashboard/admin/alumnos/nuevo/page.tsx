@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
+import { invalidateAdminData } from "@/lib/admin-data";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   AlumnoInsert,
@@ -155,6 +156,9 @@ export default function NewStudentPage() {
 
       if (insertError) throw insertError;
 
+      invalidateAdminData("students:");
+      invalidateAdminData("dashboard:");
+      invalidateAdminData("reports:");
       setCreatedCredentials({
         nombre: [
           normalizedName,

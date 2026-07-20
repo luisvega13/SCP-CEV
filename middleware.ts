@@ -44,23 +44,23 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claims = claimsData?.claims;
 
   const pathname = request.nextUrl.pathname;
   const isLogin = pathname === "/login";
   const isDashboard = pathname.startsWith("/dashboard");
 
-  if (!user && isDashboard) {
+  if (!claims && isDashboard) {
     return redirectWithCookies(request, response, "/login");
   }
 
-  if (!user) {
+  if (!claims) {
     return response;
   }
 
-  const isAdmin = user.app_metadata.role === "admin";
+  const appMetadata = claims.app_metadata as { role?: unknown } | undefined;
+  const isAdmin = appMetadata?.role === "admin";
 
   if (isLogin) {
     return redirectWithCookies(
