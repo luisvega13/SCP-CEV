@@ -7,6 +7,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PaymentHistory } from "@/components/PaymentHistory";
 import { FiscalResponsibleSection } from "@/components/FiscalResponsibleSection";
+import { GuardianSection } from "@/components/GuardianSection";
 import { invalidateAdminData } from "@/lib/admin-data";
 import {
   ACADEMIC_LEVEL_LABELS,
@@ -820,6 +821,8 @@ export default function StudentDetailPage() {
           </article>
         )}
       </div>
+
+      <GuardianSection studentId={studentId} />
 
       <FiscalResponsibleSection studentId={studentId} />
 

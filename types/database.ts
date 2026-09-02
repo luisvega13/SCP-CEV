@@ -20,6 +20,7 @@ export type RelacionResponsableFiscal =
   | "alumno"
   | "empresa"
   | "otro";
+export type RelacionTutor = "madre" | "padre" | "tutor";
 export type EstatusCobro =
   | "pagado"
   | "vencido"
@@ -323,6 +324,18 @@ export type AlumnoResponsableFiscal = {
   created_at: string;
 };
 
+export type TutorAlumno = {
+  id: string;
+  alumno_id: string;
+  posicion: 1 | 2;
+  relacion: RelacionTutor;
+  nombre: string;
+  telefono: string;
+  correo: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -487,6 +500,26 @@ export type Database = {
           },
         ];
       };
+      tutores_alumnos: {
+        Row: TutorAlumno;
+        Insert: Omit<TutorAlumno, "id" | "created_at" | "updated_at"> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<
+          Pick<TutorAlumno, "posicion" | "relacion" | "nombre" | "telefono" | "correo">
+        >;
+        Relationships: [
+          {
+            foreignKeyName: "tutores_alumnos_alumno_id_fkey";
+            columns: ["alumno_id"];
+            isOneToOne: false;
+            referencedRelation: "alumnos";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -590,6 +623,19 @@ export type Database = {
         };
         Returns: { relation_id: string; responsible_id: string };
       };
+      guardar_tutores_alumno: {
+        Args: {
+          p_alumno_id: string;
+          p_tutores: Array<{
+            posicion: 1 | 2;
+            relacion: RelacionTutor;
+            nombre: string;
+            telefono: string;
+            correo: string;
+          }>;
+        };
+        Returns: TutorAlumno[];
+      };
     };
     Enums: {
       nivel_escolar: NivelEscolar;
@@ -600,6 +646,7 @@ export type Database = {
       alcance_beca: AlcanceBeca;
       tipo_persona_fiscal: TipoPersonaFiscal;
       relacion_responsable_fiscal: RelacionResponsableFiscal;
+      relacion_tutor: RelacionTutor;
       mes_pago: MesPago;
       estatus_cobro: EstatusCobro;
     };
