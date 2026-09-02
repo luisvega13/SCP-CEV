@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { PaymentHistory } from "@/components/PaymentHistory";
 import {
   ACADEMIC_MONTHS,
+  getAcademicGradeLabel,
   getAcademicMonthYear,
   getCurrentAcademicMonthIndex,
   getCurrentAcademicCycle,
@@ -292,10 +293,10 @@ export default function StudentDashboardPage() {
           </div>
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Grado
+              {student.nivel === "bachillerato" ? "Semestre" : "Grado"}
             </dt>
             <dd className="mt-2 text-sm font-medium text-slate-900">
-              {student.grado}°
+              {getAcademicGradeLabel(student.nivel, student.grado)}
             </dd>
           </div>
           <div>
@@ -345,8 +346,8 @@ export default function StudentDashboardPage() {
           <div
             className={`mt-5 rounded-xl border p-5 ${
               !hasOverdueBalance
-                ? "border-emerald-200 bg-emerald-50"
-                : "border-amber-200 bg-amber-50"
+                ? "border-emerald-200 bg-white shadow-sm shadow-slate-200/40"
+                : "border-amber-200 bg-white shadow-sm shadow-slate-200/40"
             }`}
           >
             <p
@@ -377,7 +378,7 @@ export default function StudentDashboardPage() {
         )}
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <article className="rounded-xl border border-violet-200 bg-violet-50 p-6">
+          <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
             <p className="text-sm font-medium text-violet-800">
               Deuda de inscripción
             </p>
@@ -385,7 +386,7 @@ export default function StudentDashboardPage() {
               {currencyFormatter.format(student.deuda_inscripcion)}
             </p>
           </article>
-          <article className="rounded-xl border border-sky-200 bg-sky-50 p-6">
+          <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
             <p className="text-sm font-medium text-sky-800">
               Ciclo escolar
             </p>
@@ -408,7 +409,7 @@ export default function StudentDashboardPage() {
           </article>
         </div>
         {scholarship && (
-          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
             <p className="text-sm font-medium text-emerald-800">Beca aplicada</p>
             <p className="mt-1 text-lg font-bold text-emerald-950">{scholarship.becas.nombre} · {Number(scholarship.porcentaje_aplicado).toFixed(2)}%</p>
             <p className="mt-1 text-xs text-emerald-700">Aplica a {getScholarshipScopeLabel(scholarship.alcance_aplicado).toLocaleLowerCase("es-MX")} durante el ciclo {cycle}.</p>
@@ -432,12 +433,12 @@ export default function StudentDashboardPage() {
               key={month.value}
               className={`rounded-xl border p-4 transition ${
                 month.isCurrent
-                  ? "border-sky-400 bg-sky-50 ring-2 ring-sky-100"
+                  ? "border-sky-400 bg-white shadow-sm ring-2 ring-sky-100"
                   : month.isPaid
-                    ? "border-emerald-200 bg-emerald-50"
+                    ? "border-emerald-300 bg-white shadow-sm shadow-slate-200/40"
                     : month.isDue
-                      ? "border-amber-200 bg-amber-50"
-                      : "border-slate-200 bg-white"
+                      ? "border-amber-300 bg-white shadow-sm shadow-slate-200/40"
+                      : "border-slate-200 bg-white shadow-sm shadow-slate-200/40"
               }`}
             >
               <div className="flex items-start justify-between gap-2">

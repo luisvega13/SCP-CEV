@@ -24,14 +24,23 @@ import {
   StudentDrawer,
 } from "@/components/StudentDirectoryDialogs";
 import { TableSkeletonRows } from "@/components/TableSkeletonRows";
-import { getFullStudentName } from "@/lib/academic";
+import {
+  ACADEMIC_LEVEL_LABELS,
+  getAcademicGradeLabel,
+  getFullStudentName,
+  getMaximumGrade,
+} from "@/lib/academic";
 import {
   invalidateAdminData,
   loadStudentFilterOptions,
   loadStudents,
   type StudentListItem,
 } from "@/lib/admin-data";
-import type { EstadoAlumno, StudentFilterOptions } from "@/types/database";
+import type {
+  EstadoAlumno,
+  NivelEscolar,
+  StudentFilterOptions,
+} from "@/types/database";
 
 const PAGE_SIZE = 10;
 
@@ -185,7 +194,9 @@ export default function StudentsPage() {
   }
 
   const availableGrades = filterOptions.grados.filter((grade) =>
-    levelFilter === "primaria" ? grade <= 6 : grade <= 3,
+    levelFilter === "todos"
+      ? true
+      : grade <= getMaximumGrade(levelFilter as NivelEscolar),
   );
   const availableGroups = filterOptions.grupos;
   const totalPages = Math.max(1, Math.ceil(totalStudents / PAGE_SIZE));
@@ -232,6 +243,7 @@ export default function StudentsPage() {
           <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nivel
             <select value={levelFilter} onChange={(event) => { setLevelFilter(event.target.value); setGradeFilter("todos"); setGroupFilter("todos"); resetPage(); }} className={`mt-2 ${selectClass}`}>
               <option value="todos">Todos los niveles</option>
+              <option value="preescolar">Preescolar</option>
               <option value="primaria">Primaria</option>
               <option value="secundaria">Secundaria</option>
               <option value="bachillerato">Bachillerato</option>
@@ -286,7 +298,7 @@ export default function StudentsPage() {
                   <tr key={student.id} className="transition-colors hover:bg-slate-50/80">
                     <td className="whitespace-nowrap px-5 py-4 font-mono text-xs font-semibold tracking-wide text-slate-700">{student.matricula}</td>
                     <td className="whitespace-nowrap px-5 py-4 text-sm font-medium text-slate-950">{fullName}</td>
-                    <td className="whitespace-nowrap px-5 py-4 text-sm capitalize text-slate-600">{student.nivel} · {student.grado}° · Grupo {student.grupo}</td>
+                    <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">{ACADEMIC_LEVEL_LABELS[student.nivel]} · {getAcademicGradeLabel(student.nivel, student.grado)} · Grupo {student.grupo}</td>
                     <td className="px-5 py-4 text-center">
                       <span title={status.label} aria-label={status.label} className={`inline-flex ${status.className}`}><StatusIcon className="h-5 w-5" aria-hidden="true" /><span className="sr-only">{status.label}</span></span>
                     </td>

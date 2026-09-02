@@ -7,10 +7,14 @@ import { LoaderCircle, X } from "lucide-react";
 import type { StudentListItem } from "@/lib/admin-data";
 import { invalidateAdminData } from "@/lib/admin-data";
 import {
+  ACADEMIC_LEVEL_LABELS,
+  ACADEMIC_LEVELS,
   ACADEMIC_MONTHS,
+  getAcademicGradeLabel,
   getAcademicMonthYear,
   getCurrentAcademicCycle,
   getFullStudentName,
+  getMaximumGrade,
   getReEnrollmentLevel,
 } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -289,7 +293,7 @@ export function StudentDrawer({
   const [status, setStatus] = useState<EstadoAlumno>(student?.estado ?? "activo");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
-  const maximumGrade = level === "primaria" ? 6 : 3;
+  const maximumGrade = getMaximumGrade(level);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -396,8 +400,8 @@ export function StudentDrawer({
             <label className="text-sm font-medium text-slate-700">Apellido paterno<input required value={paternalSurname} onChange={(event) => setPaternalSurname(event.target.value)} className={fieldClass} /></label>
             <label className="text-sm font-medium text-slate-700">Apellido materno<input value={maternalSurname} onChange={(event) => setMaternalSurname(event.target.value)} className={fieldClass} /></label>
             <label className="text-sm font-medium text-slate-700 sm:col-span-2">Matrícula<input required disabled={mode === "edit"} minLength={4} maxLength={30} value={enrollment} onChange={(event) => setEnrollment(event.target.value)} className={fieldClass} /><span className="mt-1 block text-xs font-normal text-slate-500">{mode === "edit" ? "La matrícula no se modifica porque identifica también la cuenta de acceso." : "Se utilizará para generar el acceso del alumno."}</span></label>
-            <label className="text-sm font-medium text-slate-700">Nivel<select value={level} onChange={(event) => { setLevel(event.target.value as NivelEscolar); setGrade("1"); }} className={fieldClass}><option value="primaria">Primaria</option><option value="secundaria">Secundaria</option><option value="bachillerato">Bachillerato</option></select></label>
-            <label className="text-sm font-medium text-slate-700">Grado<select value={grade} onChange={(event) => setGrade(event.target.value)} className={fieldClass}>{Array.from({ length: maximumGrade }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value}°</option>)}</select></label>
+            <label className="text-sm font-medium text-slate-700">Nivel<select value={level} onChange={(event) => { setLevel(event.target.value as NivelEscolar); setGrade("1"); }} className={fieldClass}>{ACADEMIC_LEVELS.map((value) => <option key={value} value={value}>{ACADEMIC_LEVEL_LABELS[value]}</option>)}</select></label>
+            <label className="text-sm font-medium text-slate-700">{level === "bachillerato" ? "Semestre" : "Grado"}<select value={grade} onChange={(event) => setGrade(event.target.value)} className={fieldClass}>{Array.from({ length: maximumGrade }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{getAcademicGradeLabel(level, value)}</option>)}</select></label>
             <label className="text-sm font-medium text-slate-700">Grupo<input required maxLength={10} value={group} onChange={(event) => setGroup(event.target.value)} className={fieldClass} /></label>
             <label className="text-sm font-medium text-slate-700">Sexo<select value={sex} onChange={(event) => setSex(event.target.value as SexoAlumno)} className={fieldClass}><option value="mujer">Mujer</option><option value="hombre">Hombre</option></select></label>
             <label className="text-sm font-medium text-slate-700 sm:col-span-2">Estado académico<select value={status} onChange={(event) => setStatus(event.target.value as EstadoAlumno)} className={fieldClass}><option value="activo">Activo</option><option value="pausa">Pausa temporal</option><option value="baja">Baja definitiva</option></select></label>

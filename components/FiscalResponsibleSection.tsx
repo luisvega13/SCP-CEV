@@ -142,7 +142,7 @@ function FiscalDatum({
   secondary?: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-200/40">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
       <div className="mt-1.5 flex items-start justify-between gap-3">
         <div className="min-w-0">

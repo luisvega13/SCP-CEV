@@ -9,7 +9,10 @@ import {
   LoaderCircle,
   X,
 } from "lucide-react";
-import { getCurrentAcademicCycle } from "@/lib/academic";
+import {
+  ACADEMIC_LEVELS,
+  getCurrentAcademicCycle,
+} from "@/lib/academic";
 import {
   invalidateAdminData,
   loadConfigurations as fetchConfigurations,
@@ -28,7 +31,7 @@ const currencyFormatter = new Intl.NumberFormat("es-MX", {
 const fieldClass =
   "mt-2 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
 
-const levels: NivelEscolar[] = ["primaria", "secundaria", "bachillerato"];
+const levels = ACADEMIC_LEVELS;
 
 function createAcademicCycle(startYear: number) {
   return `${startYear}-${startYear + 1}`;
@@ -55,6 +58,7 @@ export default function ConfigurationPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [paymentLocks, setPaymentLocks] = useState<Record<NivelEscolar, boolean>>({
+    preescolar: false,
     primaria: false,
     secundaria: false,
     bachillerato: false,
@@ -87,11 +91,14 @@ export default function ConfigurationPage() {
         if (lockError) throw lockError;
         if (isMounted) {
           setConfigurations(data);
-          setPaymentLocks({
-            primaria: Boolean(lockResults[0].data),
-            secundaria: Boolean(lockResults[1].data),
-            bachillerato: Boolean(lockResults[2].data),
-          });
+          setPaymentLocks(
+            Object.fromEntries(
+              levels.map((itemLevel, index) => [
+                itemLevel,
+                Boolean(lockResults[index].data),
+              ]),
+            ) as Record<NivelEscolar, boolean>,
+          );
           const selected = data.find((item) => item.nivel === level);
           setEnrollmentCost(selected ? String(selected.costo_inscripcion) : "");
           setMonthlyCost(selected ? String(selected.costo_mensualidad) : "");
@@ -307,7 +314,7 @@ export default function ConfigurationPage() {
                 onClick={() => selectConfiguration(itemLevel)}
                 className={`rounded-xl border p-5 text-left shadow-sm transition ${
                   level === itemLevel
-                    ? "border-sky-400 bg-sky-50 ring-2 ring-sky-100"
+                    ? "border-sky-400 bg-white shadow-md ring-2 ring-sky-100"
                     : "border-slate-200 bg-white hover:border-slate-300"
                 }`}
               >

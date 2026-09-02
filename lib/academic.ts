@@ -1,5 +1,27 @@
 import type { Alumno, MesPago, NivelEscolar } from "@/types/database";
 
+export const ACADEMIC_LEVELS: NivelEscolar[] = [
+  "preescolar",
+  "primaria",
+  "secundaria",
+  "bachillerato",
+];
+
+export const ACADEMIC_LEVEL_LABELS: Record<NivelEscolar, string> = {
+  preescolar: "Preescolar",
+  primaria: "Primaria",
+  secundaria: "Secundaria",
+  bachillerato: "Bachillerato",
+};
+
+export function getMaximumGrade(level: NivelEscolar) {
+  return level === "primaria" || level === "bachillerato" ? 6 : 3;
+}
+
+export function getAcademicGradeLabel(level: NivelEscolar, grade: number) {
+  return level === "bachillerato" ? `${grade}° semestre` : `${grade}° grado`;
+}
+
 export const ACADEMIC_MONTHS: Array<{
   value: MesPago;
   label: string;
@@ -54,6 +76,7 @@ export function getReEnrollmentLevel(
   if (!student.promocion_habilitada || cycle <= student.ciclo_grado_actual) {
     return student.nivel;
   }
+  if (student.nivel === "preescolar" && student.grado >= 3) return "primaria";
   if (student.nivel === "primaria" && student.grado >= 6) return "secundaria";
   if (student.nivel === "secundaria" && student.grado >= 3) return "bachillerato";
   return student.nivel;

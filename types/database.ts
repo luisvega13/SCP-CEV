@@ -1,4 +1,8 @@
-export type NivelEscolar = "primaria" | "secundaria" | "bachillerato";
+export type NivelEscolar =
+  | "preescolar"
+  | "primaria"
+  | "secundaria"
+  | "bachillerato";
 export type EstadoAlumno = "activo" | "pausa" | "baja";
 export type SexoAlumno = "hombre" | "mujer";
 export type TipoPago = "inscripcion" | "mensualidad";
