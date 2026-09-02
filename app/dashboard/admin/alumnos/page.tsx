@@ -272,9 +272,9 @@ export default function StudentsPage() {
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="min-w-[980px] w-full divide-y divide-slate-200">
+      <div className="mt-6 w-full max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm [contain:inline-size]">
+        <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
+          <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
                 <SortableHeading label="Matrícula" sortKey="matricula" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />

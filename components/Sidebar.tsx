@@ -96,7 +96,7 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
           <span className="sr-only">Cargando sección...</span>
         </div>
       )}
-      <header className="fixed inset-x-0 top-0 z-30 flex h-16 items-center justify-between border-b bg-white px-4 md:hidden">
+      <header className="fixed left-0 top-0 z-30 flex h-16 w-[100dvw] max-w-[100dvw] items-center justify-between border-b bg-white px-4 lg:hidden">
         <Link
           href={dashboardHome}
           onClick={(event) => handleNavigation(event, dashboardHome)}
@@ -110,8 +110,8 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
           <span className="block h-0.5 w-5 bg-current" /><span className="my-1 block h-0.5 w-5 bg-current" /><span className="block h-0.5 w-5 bg-current" />
         </button>
       </header>
-      {isOpen && <button type="button" className="fixed inset-0 z-30 bg-slate-950/40 md:hidden" onClick={() => setIsOpen(false)} aria-label="Cerrar menú" />}
-      <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-950 px-4 py-6 text-white transition-transform md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      {isOpen && <button type="button" className="fixed inset-0 z-30 bg-slate-950/40 lg:hidden" onClick={() => setIsOpen(false)} aria-label="Cerrar menú" />}
+      <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-950 px-4 py-6 text-white transition-transform lg:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <Link
           href={dashboardHome}
           onClick={(event) => handleNavigation(event, dashboardHome)}

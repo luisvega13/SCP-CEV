@@ -172,12 +172,12 @@ function SectionCard({
   className?: string;
 }) {
   return (
-    <section className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 ${className}`}>
-      <div>
+    <section className={`min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 ${className}`}>
+      <div className="min-w-0">
         <h2 className="text-lg font-bold text-slate-950">{title}</h2>
         <p className="mt-1 text-sm text-slate-500">{description}</p>
       </div>
-      <div className="mt-6">{children}</div>
+      <div className="mt-6 min-w-0 max-w-full">{children}</div>
     </section>
   );
 }
@@ -259,7 +259,7 @@ export default function AdminDashboardPage() {
   ];
 
   return (
-    <section className="mx-auto max-w-[1600px] pb-12">
+    <section className="mx-auto w-full min-w-0 max-w-[1600px] pb-12">
       <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-medium text-sky-600">Panel administrativo</p>
@@ -306,7 +306,7 @@ export default function AdminDashboardPage() {
         </div>
       ) : overview ? (
         <>
-          <div className="mt-6 grid gap-6 xl:grid-cols-[1.35fr_1fr]">
+          <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             <SectionCard title="Cobranza del periodo" description="Indicadores de liquidez, cartera y comportamiento frente al mes anterior.">
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <MiniStat label="Cobrado hoy" value={currencyFormatter.format(finance?.collected_today ?? 0)} detail={`${numberFormatter.format(finance?.payment_count_today ?? 0)} movimientos`} icon={Banknote} />
@@ -343,7 +343,7 @@ export default function AdminDashboardPage() {
             </SectionCard>
           </div>
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-2">
+          <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-2">
             <SectionCard title="Tendencia de ingresos" description="Recaudación real de los últimos seis meses.">
               <div className="flex h-64 items-end gap-2 sm:gap-4">
                 {overview.monthly_trend.map((item) => {
@@ -395,9 +395,9 @@ export default function AdminDashboardPage() {
             </SectionCard>
           </div>
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_1fr_1fr]">
+          <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
             <SectionCard title="Alumnos y cartera por nivel" description="Padrón, cobranza del ciclo y saldo pendiente por nivel.">
-              <div className="overflow-x-auto">
+              <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
                 <table className="w-full min-w-[520px]">
                   <thead><tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500"><th className="pb-3 font-semibold">Nivel</th><th className="pb-3 text-right font-semibold">Activos / Total</th><th className="pb-3 text-right font-semibold">Recaudado</th><th className="pb-3 text-right font-semibold">Pendiente</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
@@ -420,10 +420,10 @@ export default function AdminDashboardPage() {
                   const total = overview.payments_by_type.reduce((sum, row) => sum + row.amount, 0);
                   const percentage = total ? (item.amount / total) * 100 : 0;
                   return (
-                    <div key={item.type} className="rounded-xl border border-slate-200 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div><p className="text-sm font-semibold capitalize text-slate-800">{item.type}</p><p className="mt-1 text-xs text-slate-500">{item.count} movimientos</p></div>
-                        <p className="text-sm font-bold tabular-nums text-slate-950">{currencyFormatter.format(item.amount)}</p>
+                    <div key={item.type} className="min-w-0 rounded-xl border border-slate-200 p-4">
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0"><p className="truncate text-sm font-semibold capitalize text-slate-800">{item.type}</p><p className="mt-1 text-xs text-slate-500">{item.count} movimientos</p></div>
+                        <p className="shrink-0 whitespace-nowrap text-xs font-bold tabular-nums text-slate-950 sm:text-sm">{currencyFormatter.format(item.amount)}</p>
                       </div>
                       <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-sky-500" style={{ width: `${percentage}%` }} /></div>
                     </div>
@@ -438,12 +438,12 @@ export default function AdminDashboardPage() {
                   const percentage = paymentMethodTotal ? (item.amount / paymentMethodTotal) * 100 : 0;
                   const MethodIcon = item.method === "efectivo" ? Banknote : item.method === "tarjeta" ? CreditCard : Landmark;
                   return (
-                    <div key={item.method}>
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="inline-flex items-center gap-2 font-medium text-slate-700"><MethodIcon className="h-4 w-4 text-slate-400" />{getPaymentMethodLabel(item.method)}</span>
-                        <span className="font-semibold tabular-nums text-slate-950">{currencyFormatter.format(item.amount)}</span>
+                    <div key={item.method} className="min-w-0">
+                      <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
+                        <span className="inline-flex min-w-0 items-center gap-2 font-medium text-slate-700"><MethodIcon className="h-4 w-4 shrink-0 text-slate-400" /><span className="truncate">{getPaymentMethodLabel(item.method)}</span></span>
+                        <span className="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-950 sm:text-sm">{currencyFormatter.format(item.amount)}</span>
                       </div>
-                      <div className="mt-2 flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-500" style={{ width: `${percentage}%` }} /></div><span className="w-12 text-right text-xs text-slate-400">{item.count} mov.</span></div>
+                      <div className="mt-2 flex min-w-0 items-center gap-3"><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-500" style={{ width: `${percentage}%` }} /></div><span className="w-12 shrink-0 text-right text-xs text-slate-400">{item.count} mov.</span></div>
                     </div>
                   );
                 })}
@@ -451,7 +451,7 @@ export default function AdminDashboardPage() {
             </SectionCard>
           </div>
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-[1.4fr_0.6fr]">
+          <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,0.6fr)]">
             <SectionCard title="Actividad reciente" description="Últimos pagos registrados en el sistema.">
               {overview.recent_payments.length === 0 ? (
                 <p className="rounded-xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">Todavía no hay pagos registrados.</p>

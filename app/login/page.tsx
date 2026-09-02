@@ -8,6 +8,34 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 const fieldClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
 
+const AUTH_TIMEOUT_MS = 15_000;
+
+function getLoginErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return "No fue posible iniciar sesión. Inténtalo nuevamente.";
+  }
+
+  if (error.message.includes("NEXT_PUBLIC_SUPABASE")) {
+    return error.message;
+  }
+
+  const message = error.message.toLowerCase();
+  if (
+    message.includes("timeout") ||
+    message.includes("fetch") ||
+    message.includes("network") ||
+    message.includes("conectar")
+  ) {
+    return "No fue posible conectar con Supabase. Revisa tu conexión e inténtalo nuevamente.";
+  }
+
+  if (message.includes("invalid login credentials")) {
+    return "Correo electrónico o contraseña incorrectos.";
+  }
+
+  return "No fue posible iniciar sesión. Verifica tus datos e inténtalo nuevamente.";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -22,27 +50,38 @@ export default function LoginPage() {
 
     try {
       const supabase = getSupabaseBrowserClient();
-      const { data, error: signInError } =
-        await supabase.auth.signInWithPassword({
+      const signInRequest = supabase.auth.signInWithPassword({
           email: email.trim().toLowerCase(),
           password,
         });
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error("Tiempo de conexión agotado")),
+          AUTH_TIMEOUT_MS,
+        );
+      });
+      const { data, error: signInError } = await Promise.race([
+        signInRequest,
+        timeout,
+      ]);
 
       if (signInError) throw signInError;
 
       const role = data.user.app_metadata.role;
+      if (role !== "admin" && role !== "student") {
+        await supabase.auth.signOut();
+        throw new Error("La cuenta no tiene un rol válido asignado.");
+      }
+
       const destination =
         role === "admin" ? "/dashboard/admin" : "/dashboard/alumno";
 
       router.replace(destination);
+      router.refresh();
     } catch (caughtError) {
       console.error("Error al iniciar sesión:", caughtError);
-      setError(
-        caughtError instanceof Error &&
-          caughtError.message.includes("NEXT_PUBLIC_SUPABASE")
-          ? caughtError.message
-          : "Correo electrónico o contraseña incorrectos.",
-      );
+      setError(getLoginErrorMessage(caughtError));
+    } finally {
       setIsSubmitting(false);
     }
   }
