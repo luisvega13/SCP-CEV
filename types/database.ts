@@ -8,6 +8,14 @@ export type MetodoPago =
   | "transferencia"
   | "deposito";
 export type AlcanceBeca = "mensualidad" | "inscripcion" | "ambas";
+export type TipoPersonaFiscal = "fisica" | "moral";
+export type RelacionResponsableFiscal =
+  | "madre"
+  | "padre"
+  | "tutor"
+  | "alumno"
+  | "empresa"
+  | "otro";
 export type EstatusCobro =
   | "pagado"
   | "vencido"
@@ -278,6 +286,39 @@ export type AlumnoBeca = {
   fecha_asignacion: string;
 };
 
+export type CatalogoRegimenFiscal = {
+  clave: string;
+  descripcion: string;
+  aplica_fisica: boolean;
+  aplica_moral: boolean;
+  activo: boolean;
+};
+
+export type CatalogoUsoCfdi = CatalogoRegimenFiscal;
+
+export type ResponsableFiscal = {
+  id: string;
+  tipo_persona: TipoPersonaFiscal;
+  rfc: string;
+  nombre_razon_social: string;
+  codigo_postal_fiscal: string;
+  regimen_fiscal: string;
+  uso_cfdi_predeterminado: string;
+  correo_facturacion: string | null;
+  created_at: string;
+  updated_at: string;
+  updated_by: string | null;
+};
+
+export type AlumnoResponsableFiscal = {
+  id: string;
+  alumno_id: string;
+  responsable_fiscal_id: string;
+  relacion: RelacionResponsableFiscal;
+  es_predeterminado: boolean;
+  created_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -395,6 +436,53 @@ export type Database = {
           },
         ];
       };
+      catalogo_regimenes_fiscales: {
+        Row: CatalogoRegimenFiscal;
+        Insert: CatalogoRegimenFiscal;
+        Update: Partial<CatalogoRegimenFiscal>;
+        Relationships: [];
+      };
+      catalogo_usos_cfdi: {
+        Row: CatalogoUsoCfdi;
+        Insert: CatalogoUsoCfdi;
+        Update: Partial<CatalogoUsoCfdi>;
+        Relationships: [];
+      };
+      responsables_fiscales: {
+        Row: ResponsableFiscal;
+        Insert: Omit<ResponsableFiscal, "id" | "created_at" | "updated_at" | "updated_by"> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: Partial<Omit<ResponsableFiscal, "id" | "created_at">>;
+        Relationships: [];
+      };
+      alumnos_responsables_fiscales: {
+        Row: AlumnoResponsableFiscal;
+        Insert: Omit<AlumnoResponsableFiscal, "id" | "created_at"> & {
+          id?: string;
+          created_at?: string;
+        };
+        Update: Partial<Pick<AlumnoResponsableFiscal, "relacion" | "es_predeterminado">>;
+        Relationships: [
+          {
+            foreignKeyName: "alumnos_responsables_fiscales_alumno_id_fkey";
+            columns: ["alumno_id"];
+            isOneToOne: false;
+            referencedRelation: "alumnos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "alumnos_responsables_fiscales_responsable_fiscal_id_fkey";
+            columns: ["responsable_fiscal_id"];
+            isOneToOne: false;
+            referencedRelation: "responsables_fiscales";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -482,6 +570,22 @@ export type Database = {
         Args: Record<string, never>;
         Returns: StudentFilterOptions;
       };
+      guardar_responsable_fiscal_alumno: {
+        Args: {
+          p_alumno_id: string;
+          p_responsable_id: string | null;
+          p_tipo_persona: TipoPersonaFiscal;
+          p_rfc: string;
+          p_nombre_razon_social: string;
+          p_codigo_postal_fiscal: string;
+          p_regimen_fiscal: string;
+          p_uso_cfdi: string;
+          p_correo_facturacion: string;
+          p_relacion: RelacionResponsableFiscal;
+          p_es_predeterminado: boolean;
+        };
+        Returns: { relation_id: string; responsible_id: string };
+      };
     };
     Enums: {
       nivel_escolar: NivelEscolar;
@@ -490,6 +594,8 @@ export type Database = {
       tipo_pago: TipoPago;
       metodo_pago: MetodoPago;
       alcance_beca: AlcanceBeca;
+      tipo_persona_fiscal: TipoPersonaFiscal;
+      relacion_responsable_fiscal: RelacionResponsableFiscal;
       mes_pago: MesPago;
       estatus_cobro: EstatusCobro;
     };

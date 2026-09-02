@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PaymentHistory } from "@/components/PaymentHistory";
+import { FiscalResponsibleSection } from "@/components/FiscalResponsibleSection";
 import { invalidateAdminData } from "@/lib/admin-data";
 import {
   ACADEMIC_MONTHS,
@@ -815,6 +816,8 @@ export default function StudentDetailPage() {
           </article>
         )}
       </div>
+
+      <FiscalResponsibleSection studentId={studentId} />
 
       <div id="registrar-pago" className="mt-8 scroll-mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div>
