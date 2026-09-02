@@ -53,7 +53,7 @@ export default function PaymentsPage() {
   }, []);
 
   return (
-    <section>
+    <section className="mx-auto max-w-7xl">
       <div>
         <p className="text-sm font-medium text-sky-600">Administración</p>
         <h1 className="mt-1 text-3xl font-bold text-slate-950">
@@ -74,8 +74,8 @@ export default function PaymentsPage() {
         </p>
       )}
 
-      <div className="mt-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
+      <div className="mt-8 w-full max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm [contain:inline-size]">
+        <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>

@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleDollarSign,
   Download,
+  LoaderCircle,
   TriangleAlert,
   Users,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
   loadStudentFilterOptions,
   type FinancialAccountRow,
 } from "@/lib/admin-data";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   EstatusCobro,
   FinancialReportKpis,
@@ -87,6 +89,13 @@ function parseDate(value: string) {
   return new Date(`${value}T00:00:00-06:00`);
 }
 
+function normalizeWhatsAppPhone(value: string) {
+  let digits = value.replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.length === 10) digits = `52${digits}`;
+  return digits.length >= 11 && digits.length <= 15 ? digits : null;
+}
+
 export function FinancialReports() {
   const [rows, setRows] = useState<FinancialRow[]>([]);
   const [kpis, setKpis] = useState<FinancialReportKpis>(EMPTY_KPIS);
@@ -100,6 +109,8 @@ export function FinancialReports() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [reminderError, setReminderError] = useState("");
+  const [remindingId, setRemindingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [filterOptions, setFilterOptions] = useState<StudentFilterOptions>({ grados: [], grupos: [] });
@@ -216,21 +227,54 @@ export function FinancialReports() {
 
   async function sendReminder(row: FinancialRow) {
     const balance = Math.max(row.monto_esperado - row.monto_pagado, 0);
-    const message = `${getFullStudentName(row.alumnos)} tiene un saldo pendiente de ${currencyFormatter.format(balance)} por ${row.concepto}, con fecha límite ${dateFormatter.format(parseDate(row.fecha_limite))}.`;
+    const studentName = getFullStudentName(row.alumnos);
+    setNotice("");
+    setReminderError("");
+    setRemindingId(row.id);
+
+    // Se abre durante el clic para evitar que el navegador bloquee la pestaña
+    // mientras se consulta el teléfono en Supabase.
+    const whatsappWindow = window.open("about:blank", "whatsapp-reminder");
 
     try {
-      if (navigator.share) {
-        await navigator.share({ title: "Recordatorio de pago", text: message });
-        setNotice("Recordatorio compartido correctamente.");
+      const { data: tutor, error: tutorError } = await getSupabaseBrowserClient()
+        .from("tutores_alumnos")
+        .select("nombre, telefono")
+        .eq("alumno_id", row.alumnos.id)
+        .eq("posicion", 1)
+        .maybeSingle();
+
+      if (tutorError) throw tutorError;
+      if (!tutor) {
+        throw new Error(
+          `No hay un tutor principal registrado para ${studentName}. Regístralo desde el perfil del alumno.`,
+        );
+      }
+
+      const phone = normalizeWhatsAppPhone(tutor.telefono);
+      if (!phone) {
+        throw new Error(
+          `El teléfono del tutor principal de ${studentName} no es válido para WhatsApp.`,
+        );
+      }
+
+      const message = `Hola ${tutor.nombre}. Le enviamos un recordatorio del estado de cuenta de ${studentName}: existe un saldo pendiente de ${currencyFormatter.format(balance)} por ${row.concepto}, con fecha límite ${dateFormatter.format(parseDate(row.fecha_limite))}. Si ya realizó el pago, por favor ignore este mensaje.`;
+      const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+
+      if (whatsappWindow) {
+        whatsappWindow.opener = null;
+        whatsappWindow.location.replace(whatsappUrl);
       } else {
-        await navigator.clipboard.writeText(message);
-        setNotice("Recordatorio copiado al portapapeles.");
+        window.location.assign(whatsappUrl);
       }
+      setNotice(`Recordatorio preparado para ${tutor.nombre} (${tutor.telefono}).`);
     } catch (caughtError) {
-      if (caughtError instanceof Error && caughtError.name === "AbortError") {
-        return;
-      }
-      setNotice("No fue posible preparar el recordatorio.");
+      whatsappWindow?.close();
+      setReminderError(
+        getErrorMessage(caughtError, "No fue posible preparar el recordatorio."),
+      );
+    } finally {
+      setRemindingId(null);
     }
   }
 
@@ -298,6 +342,11 @@ export function FinancialReports() {
       {notice && (
         <p role="status" className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
           {notice}
+        </p>
+      )}
+      {reminderError && (
+        <p role="alert" className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          {reminderError}
         </p>
       )}
 
@@ -440,8 +489,8 @@ export function FinancialReports() {
                     <td className={`whitespace-nowrap px-5 py-4 text-right text-sm font-semibold tabular-nums ${overdueBalance > 0 ? "text-red-700" : "text-slate-500"}`}>{currencyFormatter.format(overdueBalance)}</td>
                     <td className="whitespace-nowrap px-5 py-4 text-center">
                       {canRemind ? (
-                        <button type="button" onClick={() => void sendReminder(row)} title="Enviar recordatorio" aria-label={`Enviar recordatorio a ${getFullStudentName(row.alumnos)}`} className="inline-flex rounded-lg p-2 text-slate-500 transition hover:bg-sky-50 hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500">
-                          <Bell className="h-4 w-4" aria-hidden="true" />
+                        <button type="button" onClick={() => void sendReminder(row)} disabled={remindingId !== null} title="Enviar recordatorio por WhatsApp" aria-label={`Enviar recordatorio a ${getFullStudentName(row.alumnos)}`} className="inline-flex rounded-lg p-2 text-slate-500 transition hover:bg-sky-50 hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:cursor-wait disabled:opacity-50">
+                          {remindingId === row.id ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Bell className="h-4 w-4" aria-hidden="true" />}
                         </button>
                       ) : (
                         <span className="text-slate-300">—</span>

@@ -20,6 +20,9 @@ function redirectWithCookies(
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
+  const pathname = request.nextUrl.pathname;
+  const isLogin = pathname === "/login";
+  const isDashboard = pathname.startsWith("/dashboard");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -44,12 +47,22 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const { data: claimsData } = await supabase.auth.getClaims();
-  const claims = claimsData?.claims;
+  let claims: { app_metadata?: unknown } | null | undefined;
+  try {
+    const { data: claimsData, error: claimsError } =
+      await supabase.auth.getClaims();
+    if (claimsError) throw claimsError;
+    claims = claimsData?.claims;
+  } catch (error) {
+    console.error("No fue posible validar la sesión con Supabase:", error);
 
-  const pathname = request.nextUrl.pathname;
-  const isLogin = pathname === "/login";
-  const isDashboard = pathname.startsWith("/dashboard");
+    // Una ruta privada nunca se sirve si Supabase no confirmó la identidad.
+    if (isDashboard) {
+      return redirectWithCookies(request, response, "/login");
+    }
+
+    return response;
+  }
 
   if (!claims && isDashboard) {
     return redirectWithCookies(request, response, "/login");
