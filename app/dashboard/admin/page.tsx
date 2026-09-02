@@ -56,6 +56,7 @@ const shortDateFormatter = new Intl.DateTimeFormat("es-MX", {
 });
 
 const LEVEL_LABELS: Record<NivelEscolar, string> = {
+  preescolar: "Preescolar",
   primaria: "Primaria",
   secundaria: "Secundaria",
   bachillerato: "Bachillerato",
@@ -100,18 +101,18 @@ function MetricCard({
   isLoading: boolean;
 }) {
   const tones = {
-    sky: "border-sky-200 bg-sky-50 text-sky-950 [&_.metric-icon]:bg-sky-100 [&_.metric-icon]:text-sky-700",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-950 [&_.metric-icon]:bg-emerald-100 [&_.metric-icon]:text-emerald-700",
-    amber: "border-amber-200 bg-amber-50 text-amber-950 [&_.metric-icon]:bg-amber-100 [&_.metric-icon]:text-amber-700",
-    red: "border-red-200 bg-red-50 text-red-950 [&_.metric-icon]:bg-red-100 [&_.metric-icon]:text-red-700",
-    violet: "border-violet-200 bg-violet-50 text-violet-950 [&_.metric-icon]:bg-violet-100 [&_.metric-icon]:text-violet-700",
+    sky: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-sky-50 [&_.metric-icon]:text-sky-700",
+    emerald: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-emerald-50 [&_.metric-icon]:text-emerald-700",
+    amber: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-amber-50 [&_.metric-icon]:text-amber-700",
+    red: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-red-50 [&_.metric-icon]:text-red-700",
+    violet: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-violet-50 [&_.metric-icon]:text-violet-700",
     slate: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-slate-100 [&_.metric-icon]:text-slate-600",
   };
 
   return (
-    <article className={`rounded-2xl border p-5 shadow-sm ${tones[tone]}`}>
+    <article className={`min-w-0 overflow-hidden rounded-2xl border p-5 shadow-sm ${tones[tone]}`}>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-semibold opacity-75">{label}</p>
+        <p className="min-w-0 text-sm font-semibold opacity-75">{label}</p>
         <span className="metric-icon grid h-9 w-9 shrink-0 place-items-center rounded-lg">
           <Icon className="h-4.5 w-4.5" aria-hidden="true" />
         </span>
@@ -119,7 +120,12 @@ function MetricCard({
       {isLoading ? (
         <div className="mt-3 h-9 w-32 animate-pulse rounded bg-current opacity-10" />
       ) : (
-        <p className="mt-3 text-2xl font-bold tabular-nums sm:text-3xl">{value}</p>
+        <p
+          title={value}
+          className="mt-3 max-w-full whitespace-nowrap text-[clamp(1.25rem,calc(1rem+0.45vw),1.875rem)] font-bold leading-tight tracking-tight tabular-nums"
+        >
+          {value}
+        </p>
       )}
       <p className="mt-2 text-xs leading-5 opacity-65">{description}</p>
     </article>
@@ -138,12 +144,17 @@ function MiniStat({
   icon: LucideIcon;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+    <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/40">
       <div className="flex items-center gap-2 text-slate-500">
         <Icon className="h-4 w-4" aria-hidden="true" />
         <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
       </div>
-      <p className="mt-2 text-xl font-bold tabular-nums text-slate-950">{value}</p>
+      <p
+        title={value}
+        className="mt-2 max-w-full whitespace-nowrap text-[clamp(1.0625rem,calc(0.9rem+0.25vw),1.25rem)] font-bold leading-tight tracking-tight tabular-nums text-slate-950"
+      >
+        {value}
+      </p>
       {detail && <p className="mt-1 text-xs text-slate-500">{detail}</p>}
     </div>
   );
@@ -283,7 +294,7 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 min-[1720px]:grid-cols-6">
         {mainCards.map((card) => (
           <MetricCard key={card.label} {...card} isLoading={isLoading} />
         ))}

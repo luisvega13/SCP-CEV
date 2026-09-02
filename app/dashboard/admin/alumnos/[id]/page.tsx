@@ -6,12 +6,17 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PaymentHistory } from "@/components/PaymentHistory";
+import { FiscalResponsibleSection } from "@/components/FiscalResponsibleSection";
 import { invalidateAdminData } from "@/lib/admin-data";
 import {
+  ACADEMIC_LEVEL_LABELS,
+  ACADEMIC_LEVELS,
   ACADEMIC_MONTHS,
+  getAcademicGradeLabel,
   getAcademicMonthYear,
   getCurrentAcademicCycle,
   getFullStudentName,
+  getMaximumGrade,
   getReEnrollmentLevel,
 } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -260,7 +265,7 @@ export default function StudentDetailPage() {
       .replace(/\s+/g, " ");
     const normalizedGroup = editGroup.trim().toUpperCase();
     const numericGrade = Number(editGrade);
-    const maximumGrade = editLevel === "primaria" ? 6 : 3;
+    const maximumGrade = getMaximumGrade(editLevel);
 
     setProfileError("");
     setProfileMessage("");
@@ -547,7 +552,7 @@ export default function StudentDetailPage() {
             </span>
           </div>
           <p className="mt-2 text-sm capitalize text-slate-500">
-            {student.nivel} · {student.grado}° grado · Grupo {student.grupo}
+            {ACADEMIC_LEVEL_LABELS[student.nivel]} · {getAcademicGradeLabel(student.nivel, student.grado)} · Grupo {student.grupo}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -660,14 +665,14 @@ export default function StudentDetailPage() {
               }}
               className={fieldClass}
             >
-              <option value="primaria">Primaria</option>
-              <option value="secundaria">Secundaria</option>
-              <option value="bachillerato">Bachillerato</option>
+              {ACADEMIC_LEVELS.map((value) => (
+                <option key={value} value={value}>{ACADEMIC_LEVEL_LABELS[value]}</option>
+              ))}
             </select>
           </div>
           <div>
             <label htmlFor="editGrade" className="text-sm font-medium text-slate-700">
-              Grado
+              {editLevel === "bachillerato" ? "Semestre" : "Grado"}
             </label>
             <select
               id="editGrade"
@@ -676,11 +681,11 @@ export default function StudentDetailPage() {
               className={fieldClass}
             >
               {Array.from(
-                { length: editLevel === "primaria" ? 6 : 3 },
+                { length: getMaximumGrade(editLevel) },
                 (_, index) => index + 1,
               ).map((grade) => (
                 <option key={grade} value={grade}>
-                  {grade}°
+                  {getAcademicGradeLabel(editLevel, grade)}
                 </option>
               ))}
             </select>
@@ -723,7 +728,7 @@ export default function StudentDetailPage() {
       )}
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
-        <article className="rounded-xl border border-violet-200 bg-violet-50 p-6">
+        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
           <p className="text-sm font-medium text-violet-800">
             {activeConceptLabel}
           </p>
@@ -753,7 +758,7 @@ export default function StudentDetailPage() {
             </p>
           )}
         </article>
-        <article className="rounded-xl border border-sky-200 bg-sky-50 p-6">
+        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
           <p className="text-sm font-medium text-sky-800">Ciclo escolar</p>
           <div
             role="group"
@@ -806,7 +811,7 @@ export default function StudentDetailPage() {
           )}
         </article>
         {scholarship && (
-          <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 sm:col-span-2">
+          <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50 sm:col-span-2">
             <p className="text-sm font-medium text-emerald-800">Beca aplicada</p>
             <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
               <div><p className="text-xl font-bold text-emerald-950">{scholarship.becas.nombre} · {Number(scholarship.porcentaje_aplicado).toFixed(2)}%</p><p className="mt-1 text-xs text-emerald-700">Aplica a {getScholarshipScopeLabel(scholarship.alcance_aplicado).toLocaleLowerCase("es-MX")} durante {cycle}.</p></div>
@@ -815,6 +820,8 @@ export default function StudentDetailPage() {
           </article>
         )}
       </div>
+
+      <FiscalResponsibleSection studentId={studentId} />
 
       <div id="registrar-pago" className="mt-8 scroll-mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div>
@@ -863,7 +870,7 @@ export default function StudentDetailPage() {
             <p className="block text-sm font-medium text-slate-700">
               Concepto automático
             </p>
-            <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3">
+            <div className="mt-2 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-200/40">
               <p className="text-sm font-semibold text-sky-950">
                 {activeConceptLabel}
               </p>
@@ -941,8 +948,8 @@ export default function StudentDetailPage() {
               key={month.value}
               className={`rounded-xl border p-4 ${
                 month.isPaid
-                  ? "border-emerald-200 bg-emerald-50"
-                  : "border-slate-200 bg-white"
+                  ? "border-emerald-300 bg-white shadow-sm shadow-slate-200/40"
+                  : "border-slate-200 bg-white shadow-sm shadow-slate-200/40"
               }`}
             >
               <div className="flex items-start justify-between gap-3">

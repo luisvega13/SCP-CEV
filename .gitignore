@@ -3,3 +3,4 @@
 /out
 .env*.local
 *.tsbuildinfo
+datos-demo-credenciales.csv

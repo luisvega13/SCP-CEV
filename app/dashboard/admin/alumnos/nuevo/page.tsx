@@ -5,6 +5,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { invalidateAdminData } from "@/lib/admin-data";
+import {
+  ACADEMIC_LEVEL_LABELS,
+  ACADEMIC_LEVELS,
+  getAcademicGradeLabel,
+  getMaximumGrade,
+} from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   AlumnoInsert,
@@ -324,15 +330,15 @@ export default function NewStudentPage() {
             }}
             className={fieldClass}
           >
-            <option value="primaria">Primaria</option>
-            <option value="secundaria">Secundaria</option>
-            <option value="bachillerato">Bachillerato</option>
+            {ACADEMIC_LEVELS.map((value) => (
+              <option key={value} value={value}>{ACADEMIC_LEVEL_LABELS[value]}</option>
+            ))}
           </select>
         </div>
 
         <div>
           <label htmlFor="grado" className="text-sm font-medium text-slate-700">
-            Grado
+            {nivel === "bachillerato" ? "Semestre" : "Grado"}
           </label>
           <select
             id="grado"
@@ -342,11 +348,11 @@ export default function NewStudentPage() {
             className={fieldClass}
           >
             {Array.from(
-              { length: nivel === "primaria" ? 6 : 3 },
+              { length: getMaximumGrade(nivel) },
               (_, index) => index + 1,
             ).map((grade) => (
               <option key={grade} value={grade}>
-                {grade}°
+                {getAcademicGradeLabel(nivel, grade)}
               </option>
             ))}
           </select>

@@ -12,7 +12,13 @@ import {
   Users,
 } from "lucide-react";
 import { TableSkeletonRows } from "@/components/TableSkeletonRows";
-import { getFullStudentName } from "@/lib/academic";
+import {
+  ACADEMIC_LEVEL_LABELS,
+  ACADEMIC_LEVELS,
+  getAcademicGradeLabel,
+  getFullStudentName,
+  getMaximumGrade,
+} from "@/lib/academic";
 import {
   loadFinancialReportKpis,
   loadFinancialReportPage,
@@ -22,6 +28,7 @@ import {
 import type {
   EstatusCobro,
   FinancialReportKpis,
+  NivelEscolar,
   StudentFilterOptions,
   TipoPago,
 } from "@/types/database";
@@ -147,9 +154,11 @@ export function FinancialReports() {
     loadStudentFilterOptions().then(setFilterOptions).catch(() => undefined);
   }, []);
 
-  const levels = ["primaria", "secundaria", "bachillerato"];
+  const levels = ACADEMIC_LEVELS;
   const grades = filterOptions.grados.filter((grade) =>
-    levelFilter === "primaria" ? grade <= 6 : grade <= 3,
+    levelFilter === "todos"
+      ? true
+      : grade <= getMaximumGrade(levelFilter as NivelEscolar),
   );
   const groups = filterOptions.grupos;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -230,25 +239,25 @@ export function FinancialReports() {
       label: "Total Recaudado",
       value: currencyFormatter.format(kpis.total_recaudado),
       icon: CircleDollarSign,
-      style: "border-emerald-200 bg-emerald-50 text-emerald-950",
+      iconStyle: "bg-emerald-50 text-emerald-700",
     },
     {
       label: "Saldo Actual Vencido",
       value: currencyFormatter.format(kpis.saldo_actual_vencido),
       icon: TriangleAlert,
-      style: "border-orange-200 bg-orange-50 text-orange-950",
+      iconStyle: "bg-orange-50 text-orange-700",
     },
     {
       label: "Proyección de Ingresos",
       value: currencyFormatter.format(kpis.proyeccion_ingresos),
       icon: ChartNoAxesCombined,
-      style: "border-sky-200 bg-sky-50 text-sky-950",
+      iconStyle: "bg-sky-50 text-sky-700",
     },
     {
       label: "Alumnos con Adeudo",
       value: kpis.alumnos_con_adeudo.toLocaleString("es-MX"),
       icon: Users,
-      style: "border-red-200 bg-red-50 text-red-950",
+      iconStyle: "bg-red-50 text-red-700",
     },
   ];
 
@@ -296,10 +305,12 @@ export function FinancialReports() {
         {cards.map((card) => {
           const Icon = card.icon;
           return (
-            <article key={card.label} className={`rounded-xl border p-5 shadow-sm ${card.style}`}>
+            <article key={card.label} className="rounded-xl border border-slate-200 bg-white p-5 text-slate-950 shadow-sm shadow-slate-200/50">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium opacity-75">{card.label}</p>
-                <Icon className="h-5 w-5 opacity-70" aria-hidden="true" />
+                <p className="text-sm font-medium text-slate-600">{card.label}</p>
+                <span className={`grid h-9 w-9 place-items-center rounded-lg ${card.iconStyle}`}>
+                  <Icon className="h-5 w-5" aria-hidden="true" />
+                </span>
               </div>
               {isLoading ? (
                 <div className="mt-4 h-8 w-32 animate-pulse rounded bg-current opacity-10" />
@@ -348,7 +359,7 @@ export function FinancialReports() {
             <option value="todos">Todos los niveles</option>
             {levels.map((level) => (
               <option key={level} value={level} className="capitalize">
-                {level}
+                {ACADEMIC_LEVEL_LABELS[level]}
               </option>
             ))}
           </select>
@@ -420,7 +431,7 @@ export function FinancialReports() {
                 return (
                   <tr key={row.id} className="transition hover:bg-slate-50">
                     <td className="whitespace-nowrap px-5 py-4 text-sm font-medium text-slate-900">{getFullStudentName(row.alumnos)}</td>
-                    <td className="whitespace-nowrap px-5 py-4 text-sm capitalize text-slate-600">{row.alumnos.nivel} · {row.alumnos.grado}° · Grupo {row.alumnos.grupo}</td>
+                    <td className="whitespace-nowrap px-5 py-4 text-sm capitalize text-slate-600">{ACADEMIC_LEVEL_LABELS[row.alumnos.nivel]} · {getAcademicGradeLabel(row.alumnos.nivel, row.alumnos.grado)} · Grupo {row.alumnos.grupo}</td>
                     <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-700">{row.concepto}</td>
                     <td className="whitespace-nowrap px-5 py-4">
                       <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1 ring-inset ${statusStyles[row.estatus]}`}>{row.estatus}</span>
