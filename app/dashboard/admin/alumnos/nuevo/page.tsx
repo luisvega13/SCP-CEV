@@ -3,7 +3,6 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
 import { invalidateAdminData } from "@/lib/admin-data";
 import {
   ACADEMIC_LEVEL_LABELS,
@@ -11,49 +10,20 @@ import {
   getAcademicGradeLabel,
   getMaximumGrade,
 } from "@/lib/academic";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { CURP_HELP_TEXT, isValidCurp, normalizeCurp } from "@/lib/curp";
 import type {
-  AlumnoInsert,
-  Database,
   NivelEscolar,
   SexoAlumno,
 } from "@/types/database";
 
 type CreatedCredentials = {
   nombre: string;
-  email: string;
+  username: string;
   password: string;
 };
 
 const fieldClass =
   "mt-2 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
-
-function generateTemporaryPassword(nombre: string, matricula: string) {
-  const firstName = nombre.trim().split(/\s+/)[0] ?? "";
-  return (
-    firstName.slice(0, 2).toLocaleUpperCase("es-MX") +
-    matricula.slice(-4).toUpperCase()
-  );
-}
-
-function createIsolatedSignUpClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    throw new Error(
-      "Faltan NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-    );
-  }
-
-  return createClient<Database>(url, anonKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-  });
-}
 
 export default function NewStudentPage() {
   const [nombre, setNombre] = useState("");
@@ -81,7 +51,7 @@ export default function NewStudentPage() {
     const normalizedMaternalSurname = apellidoMaterno
       .trim()
       .replace(/\s+/g, " ");
-    const normalizedEnrollment = matricula.trim().toUpperCase();
+    const normalizedEnrollment = normalizeCurp(matricula);
     const normalizedGroup = grupo.trim().toUpperCase();
     const firstName = normalizedName.split(" ")[0] ?? "";
 
@@ -92,8 +62,8 @@ export default function NewStudentPage() {
       return;
     }
 
-    if (!/^[A-Z0-9]{4,30}$/.test(normalizedEnrollment)) {
-      setError("La matrícula debe tener entre 4 y 30 letras o números.");
+    if (!isValidCurp(normalizedEnrollment)) {
+      setError("La CURP no es válida. Revisa los 18 caracteres y el dígito verificador.");
       return;
     }
 
@@ -102,65 +72,40 @@ export default function NewStudentPage() {
       return;
     }
 
-    const email = `${normalizedEnrollment.toLowerCase()}@alumno.com`;
-    const temporaryPassword = generateTemporaryPassword(
-      normalizedName,
-      normalizedEnrollment,
-    );
-
     setIsSubmitting(true);
 
     try {
-      const adminClient = getSupabaseBrowserClient();
-
-      const { data: existingStudent, error: lookupError } = await adminClient
-        .from("alumnos")
-        .select("id")
-        .eq("matricula", normalizedEnrollment)
-        .maybeSingle();
-
-      if (lookupError) throw lookupError;
-      if (existingStudent) {
-        throw new Error("Ya existe un alumno con esa matrícula.");
-      }
-
-      const signUpClient = createIsolatedSignUpClient();
-      const { data: authData, error: signUpError } =
-        await signUpClient.auth.signUp({
-          email,
-          password: temporaryPassword,
-          options: {
-            data: {
-              nombre: normalizedName,
-              apellido_paterno: normalizedPaternalSurname,
-              apellido_materno: normalizedMaternalSurname,
-              matricula: normalizedEnrollment,
-            },
-          },
-        });
-
-      if (signUpError) throw signUpError;
-      if (!authData.user || authData.user.identities?.length === 0) {
-        throw new Error("Ya existe una cuenta asociada a esta matrícula.");
-      }
-
-      const newStudent: AlumnoInsert = {
-        nombre: normalizedName,
-        apellido_paterno: normalizedPaternalSurname,
-        apellido_materno: normalizedMaternalSurname,
-        matricula: normalizedEnrollment,
-        nivel,
-        grado: Number(grado),
-        grupo: normalizedGroup,
-        sexo,
-        usuario_id: authData.user.id,
+      const response = await fetch("/api/admin/students/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: normalizedName,
+          apellidoPaterno: normalizedPaternalSurname,
+          apellidoMaterno: normalizedMaternalSurname,
+          curp: normalizedEnrollment,
+          nivel,
+          grado: Number(grado),
+          grupo: normalizedGroup,
+          sexo,
+          estado: "activo",
+        }),
+      });
+      const responseText = await response.text();
+      let result: {
+        error?: string;
+        credentials?: { email: string; username: string; password: string };
       };
-
-      const { error: insertError } = await adminClient
-        .from("alumnos")
-        .insert(newStudent);
-
-      if (insertError) throw insertError;
+      try {
+        result = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        result = {};
+      }
+      if (!response.ok || !result.credentials) {
+        throw new Error(
+          result.error ||
+            `No fue posible registrar al alumno (error ${response.status}). Revisa la terminal del servidor.`,
+        );
+      }
 
       invalidateAdminData("students:");
       invalidateAdminData("dashboard:");
@@ -173,8 +118,8 @@ export default function NewStudentPage() {
         ]
           .filter(Boolean)
           .join(" "),
-        email,
-        password: temporaryPassword,
+        username: result.credentials.username,
+        password: result.credentials.password,
       });
       setNombre("");
       setApellidoPaterno("");
@@ -211,7 +156,7 @@ export default function NewStudentPage() {
           Registrar alumno
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          La cuenta de acceso se generará automáticamente a partir de la matrícula.
+          La CURP será el identificador institucional y el sistema generará una clave de acceso corta.
         </p>
       </div>
 
@@ -228,9 +173,9 @@ export default function NewStudentPage() {
           </p>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-emerald-700">Correo</dt>
+              <dt className="text-emerald-700">Clave de acceso</dt>
               <dd className="mt-1 font-mono font-semibold text-emerald-950">
-                {createdCredentials.email}
+                {createdCredentials.username}
               </dd>
             </div>
             <div>
@@ -300,20 +245,22 @@ export default function NewStudentPage() {
 
         <div className="sm:col-span-2">
           <label htmlFor="matricula" className="text-sm font-medium text-slate-700">
-            Matrícula
+            CURP
           </label>
           <input
             id="matricula"
             name="matricula"
             type="text"
             required
-            minLength={4}
-            maxLength={30}
+            maxLength={18}
+            autoCapitalize="characters"
+            autoComplete="off"
             value={matricula}
-            onChange={(event) => setMatricula(event.target.value)}
-            placeholder="UP220265"
+            onChange={(event) => setMatricula(normalizeCurp(event.target.value))}
+            placeholder="Ingresa la CURP del alumno"
             className={fieldClass}
           />
+          <p className="mt-1 text-xs text-slate-500">{CURP_HELP_TEXT}</p>
         </div>
 
         <div>

@@ -12,6 +12,7 @@ export type MetodoPago =
   | "transferencia"
   | "deposito";
 export type AlcanceBeca = "mensualidad" | "inscripcion" | "ambas";
+export type TipoDescuentoBeca = "porcentaje" | "monto_fijo";
 export type TipoPersonaFiscal = "fisica" | "moral";
 export type RelacionResponsableFiscal =
   | "madre"
@@ -42,10 +43,15 @@ export type MesPago =
 
 export type Alumno = {
   id: string;
+  fecha_alta: string;
   nombre: string;
   apellido_paterno: string;
   apellido_materno: string;
   matricula: string;
+  correo_acceso: string | null;
+  iniciales_clave_temporal: string | null;
+  contrasena_temporal_activa: boolean;
+  contrasena_actualizada_at: string | null;
   nivel: NivelEscolar;
   grado: number;
   grupo: string;
@@ -58,12 +64,18 @@ export type Alumno = {
   promocion_habilitada: boolean;
   pausa_automatica_inscripcion: boolean;
   fecha_pausa_inscripcion: string | null;
+  ciclo_cobro_completo: string | null;
 };
 
 export type AlumnoInsert = Omit<
   Alumno,
   | "id"
+  | "fecha_alta"
   | "matricula"
+  | "correo_acceso"
+  | "iniciales_clave_temporal"
+  | "contrasena_temporal_activa"
+  | "contrasena_actualizada_at"
   | "estado"
   | "deuda_mensualidad"
   | "deuda_inscripcion"
@@ -71,9 +83,15 @@ export type AlumnoInsert = Omit<
   | "promocion_habilitada"
   | "pausa_automatica_inscripcion"
   | "fecha_pausa_inscripcion"
+  | "ciclo_cobro_completo"
 > & {
   id?: string;
+  fecha_alta?: string;
   matricula: string;
+  correo_acceso?: string | null;
+  iniciales_clave_temporal?: string | null;
+  contrasena_temporal_activa?: boolean;
+  contrasena_actualizada_at?: string | null;
   estado?: EstadoAlumno;
   deuda_mensualidad?: number;
   deuda_inscripcion?: number;
@@ -81,16 +99,19 @@ export type AlumnoInsert = Omit<
   promocion_habilitada?: boolean;
   pausa_automatica_inscripcion?: boolean;
   fecha_pausa_inscripcion?: string | null;
+  ciclo_cobro_completo?: string | null;
 };
 export type AlumnoUpdate = Partial<AlumnoInsert>;
 
 export type Pago = {
   id: string;
+  folio_comprobante: string;
   alumno_id: string;
   nivel_cobro: NivelEscolar;
   monto: number;
   tipo_pago: TipoPago;
   metodo_pago: MetodoPago;
+  facturado: boolean;
   fecha_pago: string;
   mes: MesPago;
   anio: number;
@@ -99,10 +120,12 @@ export type Pago = {
 
 export type PagoInsert = Omit<
   Pago,
-  "id" | "fecha_pago" | "ciclo_escolar" | "nivel_cobro"
+  "id" | "folio_comprobante" | "fecha_pago" | "ciclo_escolar" | "nivel_cobro" | "facturado"
 > & {
   id?: string;
+  folio_comprobante?: string;
   fecha_pago?: string;
+  facturado?: boolean;
 };
 export type PagoUpdate = Partial<PagoInsert>;
 
@@ -113,6 +136,8 @@ export type AuditoriaPago = {
   monto_nuevo: number;
   metodo_anterior: MetodoPago | null;
   metodo_nuevo: MetodoPago | null;
+  facturado_anterior: boolean | null;
+  facturado_nuevo: boolean | null;
   motivo: string;
   modificado_por: string;
   fecha_modificacion: string;
@@ -125,6 +150,8 @@ export type AuditoriaPagoEliminado = {
   monto: number;
   tipo_pago: TipoPago;
   metodo_pago: MetodoPago;
+  facturado: boolean;
+  folio_comprobante: string | null;
   mes: MesPago;
   anio: number;
   fecha_pago_original: string;
@@ -175,9 +202,9 @@ export type EstadoCuentaInsert = Omit<
 export type EstadoCuentaUpdate = Partial<EstadoCuentaInsert>;
 
 export type FinancialReportKpis = {
-  total_recaudado: number;
-  saldo_actual_vencido: number;
-  proyeccion_ingresos: number;
+  proyeccion_mensual: number;
+  pagado_aplicado_periodo: number;
+  adeudo_pendiente_mes: number;
   alumnos_con_adeudo: number;
 };
 
@@ -273,6 +300,8 @@ export type Beca = {
   id: string;
   nombre: string;
   porcentaje: number;
+  tipo_descuento: TipoDescuentoBeca;
+  monto_fijo: number;
   alcance: AlcanceBeca;
   descripcion: string;
   activa: boolean;
@@ -287,8 +316,52 @@ export type AlumnoBeca = {
   ciclo_escolar: string;
   observaciones: string;
   porcentaje_aplicado: number;
+  tipo_descuento_aplicado: TipoDescuentoBeca;
+  monto_fijo_aplicado: number;
   alcance_aplicado: AlcanceBeca;
+  vigencia_desde: string;
   fecha_asignacion: string;
+};
+
+export type AuditoriaAsignacionBeca = {
+  id: string;
+  asignacion_id: string | null;
+  alumno_id: string;
+  beca_id: string | null;
+  beca_nombre: string;
+  ciclo_escolar: string;
+  porcentaje_aplicado: number;
+  tipo_descuento_aplicado: TipoDescuentoBeca;
+  monto_fijo_aplicado: number;
+  alcance_aplicado: AlcanceBeca;
+  vigencia_desde: string;
+  observaciones: string;
+  asignado_por: string;
+  fecha_evento: string;
+};
+
+export type BecadosPorTipo = {
+  ciclo_escolar: string;
+  generado_en: string;
+  total_becados: number;
+  tipos: Array<{
+    beca_id: string;
+    tipo_beca: string;
+    total: number;
+    alumnos: Array<{
+      nombre: string;
+      curp: string;
+      nivel: NivelEscolar;
+      grado: number;
+      grupo: string;
+      estado: EstadoAlumno;
+      porcentaje: number;
+      tipo_descuento: TipoDescuentoBeca;
+      monto_fijo: number;
+      alcance: AlcanceBeca;
+      vigencia_desde: string;
+    }>;
+  }>;
 };
 
 export type CatalogoRegimenFiscal = {
@@ -336,6 +409,206 @@ export type TutorAlumno = {
   updated_at: string;
 };
 
+export type AuditoriaCurpAlumno = {
+  id: string;
+  alumno_id: string;
+  curp_anterior: string;
+  curp_nueva: string;
+  modificado_por: string;
+  fecha_modificacion: string;
+};
+
+export type TipoEventoAuditoria =
+  | "pago_modificado"
+  | "pago_eliminado"
+  | "beca_asignada"
+  | "curp_modificada"
+  | "estado_alumno";
+
+export type EventoAuditoriaAdministrativa = {
+  id: string;
+  tipo_evento: TipoEventoAuditoria;
+  categoria: "pagos" | "becas" | "alumnos";
+  fecha: string;
+  alumno_id: string | null;
+  matricula: string | null;
+  alumno: string | null;
+  responsable: string;
+  motivo: string | null;
+  resumen: string;
+  detalle: Record<string, string | number | boolean | null>;
+};
+
+export type ConsultaAuditoriaAdministrativa = {
+  total: number;
+  pagos: number;
+  becas: number;
+  alumnos: number;
+  registros: EventoAuditoriaAdministrativa[];
+};
+
+export type CarteraVencidaAlumno = {
+  alumno_id: string;
+  matricula: string;
+  nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string;
+  nivel: NivelEscolar;
+  grado: number;
+  grupo: string;
+  cantidad_cargos: number;
+  saldo_vencido: number;
+  fecha_vencimiento_mas_antigua: string;
+  cargos: Array<{
+    id: string;
+    concepto: string;
+    tipo_pago: TipoPago;
+    fecha_limite: string;
+    saldo: number;
+  }>;
+};
+
+export type ConsultaCarteraVencida = {
+  total_alumnos: number;
+  total_saldo_vencido: number;
+  registros: CarteraVencidaAlumno[];
+};
+
+export type CorteDiario = {
+  fecha: string;
+  generado_en: string;
+  total_movimientos: number;
+  movimientos_sin_factura: number;
+  movimientos_con_factura: number;
+  total_recaudado: number;
+  recaudado_sin_factura: number;
+  recaudado_con_factura: number;
+  por_metodo: Array<{
+    metodo: MetodoPago;
+    movimientos: number;
+    movimientos_sin_factura: number;
+    movimientos_con_factura: number;
+    total: number;
+    recaudado_sin_factura: number;
+    recaudado_con_factura: number;
+  }>;
+  pagos: Array<{
+    id: string;
+    folio_comprobante: string;
+    fecha_pago: string;
+    hora_local: string;
+    alumno: string;
+    curp: string;
+    tipo_pago: TipoPago;
+    periodo: string;
+    metodo_pago: MetodoPago;
+    facturado: boolean;
+    monto: number;
+  }>;
+};
+
+export type ResumenFinancieroMensual = {
+  ciclo_escolar: string;
+  generado_en: string;
+  total_proyectado: number;
+  total_pagado: number;
+  total_adeudo: number;
+  meses: Array<{
+    orden: number;
+    mes: MesPago;
+    etiqueta: string;
+    anio: number;
+    proyectado: number;
+    pagado: number;
+    adeudo: number;
+  }>;
+};
+
+export type DesgloseAlumnos = {
+  ciclo_escolar: string;
+  generado_en: string;
+  total_general: number;
+  total_hombres: number;
+  total_mujeres: number;
+  total_activos: number;
+  total_pausas: number;
+  total_bajas: number;
+  niveles: Array<{
+    nivel: NivelEscolar;
+    total: number;
+    hombres: number;
+    mujeres: number;
+    activos: number;
+    pausas: number;
+    bajas: number;
+    grados: Array<{
+      grado: number;
+      total: number;
+      hombres: number;
+      mujeres: number;
+      activos: number;
+      pausas: number;
+      bajas: number;
+    }>;
+  }>;
+};
+
+export type BajaAlumno = {
+  id: string;
+  alumno_id: string;
+  ciclo_escolar: string;
+  fecha_baja: string | null;
+  registrado_en: string;
+  dado_baja_por: string | null;
+  matricula: string;
+  nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string;
+  nivel: NivelEscolar;
+  grado: number;
+  grupo: string;
+  sexo: SexoAlumno;
+  tipo_baja: "baja" | "pausa";
+};
+
+export type ConsultaBajasAlumnos = {
+  ciclo_escolar: string;
+  total: number;
+  hombres: number;
+  mujeres: number;
+  grados_disponibles: number[];
+  grupos_disponibles: string[];
+  registros: BajaAlumno[];
+};
+
+export type HistorialEstadoAlumno = {
+  id: string;
+  alumno_id: string;
+  ciclo_escolar: string;
+  estado_anterior: EstadoAlumno | null;
+  estado_nuevo: EstadoAlumno;
+  fecha_evento: string | null;
+  registrado_en: string;
+  dato_historico: boolean;
+  matricula: string;
+  nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string;
+  nivel: NivelEscolar;
+  grado: number;
+  grupo: string;
+  sexo: SexoAlumno;
+};
+
+export type ConsultaHistorialBajas = {
+  ciclo_escolar: string;
+  total_eventos: number;
+  total_salidas: number;
+  alumnos_reactivados: number;
+  total_reactivaciones: number;
+  registros: HistorialEstadoAlumno[];
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -344,6 +617,34 @@ export type Database = {
         Insert: AlumnoInsert;
         Update: AlumnoUpdate;
         Relationships: [];
+      };
+      alumnos_bajas: {
+        Row: BajaAlumno;
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "alumnos_bajas_alumno_id_fkey";
+            columns: ["alumno_id"];
+            isOneToOne: false;
+            referencedRelation: "alumnos";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      historial_estados_alumnos: {
+        Row: HistorialEstadoAlumno;
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "historial_estados_alumnos_alumno_id_fkey";
+            columns: ["alumno_id"];
+            isOneToOne: false;
+            referencedRelation: "alumnos";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       pagos: {
         Row: Pago;
@@ -366,15 +667,7 @@ export type Database = {
           fecha_modificacion?: string;
         };
         Update: never;
-        Relationships: [
-          {
-            foreignKeyName: "auditoria_pagos_pago_id_fkey";
-            columns: ["pago_id"];
-            isOneToOne: false;
-            referencedRelation: "pagos";
-            referencedColumns: ["id"];
-          },
-        ];
+        Relationships: [];
       };
       auditoria_pagos_eliminados: {
         Row: AuditoriaPagoEliminado;
@@ -394,9 +687,10 @@ export type Database = {
       };
       alumnos_becas: {
         Row: AlumnoBeca;
-        Insert: Omit<AlumnoBeca, "id" | "fecha_asignacion"> & {
+        Insert: Omit<AlumnoBeca, "id" | "fecha_asignacion" | "vigencia_desde"> & {
           id?: string;
           fecha_asignacion?: string;
+          vigencia_desde?: string;
         };
         Update: Partial<Pick<AlumnoBeca, "beca_id" | "observaciones">>;
         Relationships: [
@@ -415,6 +709,12 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      auditoria_asignaciones_becas: {
+        Row: AuditoriaAsignacionBeca;
+        Insert: never;
+        Update: never;
+        Relationships: [];
       };
       configuracion_costos: {
         Row: ConfiguracionCostos;
@@ -520,6 +820,20 @@ export type Database = {
           },
         ];
       };
+      auditoria_curp_alumnos: {
+        Row: AuditoriaCurpAlumno;
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "auditoria_curp_alumnos_alumno_id_fkey";
+            columns: ["alumno_id"];
+            isOneToOne: false;
+            referencedRelation: "alumnos";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -562,9 +876,18 @@ export type Database = {
         };
         Returns: number;
       };
+      generar_correo_acceso_alumno: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
       obtener_kpis_reportes_financieros: {
         Args: Record<string, never>;
-        Returns: FinancialReportKpis;
+        Returns: {
+          total_recaudado: number;
+          saldo_actual_vencido: number;
+          proyeccion_ingresos: number;
+          alumnos_con_adeudo: number;
+        };
       };
       obtener_resumen_administrativo: {
         Args: { p_ciclo_escolar: string };
@@ -582,6 +905,7 @@ export type Database = {
           p_pago_id: string;
           p_nuevo_monto: number;
           p_metodo_pago: MetodoPago;
+          p_facturado: boolean;
           p_motivo: string;
         };
         Returns: Pago;
@@ -598,6 +922,10 @@ export type Database = {
       retirar_beca_alumno: {
         Args: { p_asignacion_id: string };
         Returns: undefined;
+      };
+      obtener_becados_por_tipo: {
+        Args: { p_ciclo_escolar: string };
+        Returns: BecadosPorTipo;
       };
       eliminar_pago_auditado: {
         Args: { p_pago_id: string; p_motivo: string };
@@ -635,6 +963,71 @@ export type Database = {
           }>;
         };
         Returns: TutorAlumno[];
+      };
+      actualizar_curp_alumno: {
+        Args: { p_alumno_id: string; p_curp: string };
+        Returns: Alumno;
+      };
+      obtener_corte_diario: {
+        Args: { p_fecha: string };
+        Returns: CorteDiario;
+      };
+      obtener_resumen_financiero_mensual: {
+        Args: { p_ciclo_escolar: string };
+        Returns: ResumenFinancieroMensual;
+      };
+      obtener_desglose_alumnos: {
+        Args: { p_ciclo_escolar: string };
+        Returns: DesgloseAlumnos;
+      };
+      consultar_bajas_alumnos: {
+        Args: {
+          p_ciclo_escolar: string;
+          p_tipo_baja?: "baja" | "pausa" | null;
+          p_nivel?: NivelEscolar | null;
+          p_grado?: number | null;
+          p_grupo?: string | null;
+          p_busqueda?: string;
+          p_limite?: number;
+          p_offset?: number;
+        };
+        Returns: ConsultaBajasAlumnos;
+      };
+      consultar_historial_bajas_alumnos: {
+        Args: {
+          p_ciclo_escolar: string;
+          p_tipo_baja?: "baja" | "pausa" | null;
+          p_nivel?: NivelEscolar | null;
+          p_grado?: number | null;
+          p_grupo?: string | null;
+          p_busqueda?: string;
+          p_limite?: number;
+          p_offset?: number;
+        };
+        Returns: ConsultaHistorialBajas;
+      };
+      consultar_auditoria_administrativa: {
+        Args: {
+          p_tipo_evento?: TipoEventoAuditoria | null;
+          p_desde?: string | null;
+          p_hasta?: string | null;
+          p_busqueda?: string;
+          p_limite?: number;
+          p_offset?: number;
+        };
+        Returns: ConsultaAuditoriaAdministrativa;
+      };
+      consultar_cartera_vencida_alumnos: {
+        Args: {
+          p_nivel?: NivelEscolar | null;
+          p_grado?: number | null;
+          p_grupo?: string | null;
+          p_tipo_pago?: TipoPago | null;
+          p_busqueda?: string;
+          p_limite?: number;
+          p_offset?: number;
+        };
+        Returns: ConsultaCarteraVencida;
       };
     };
     Enums: {

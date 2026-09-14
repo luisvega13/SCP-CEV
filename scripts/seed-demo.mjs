@@ -108,6 +108,31 @@ const MATERNAL_SURNAMES = [
   "Luna", "Soto", "Salazar", "Miranda", "Carrillo", "Nunez",
 ];
 const PAYMENT_METHODS = ["efectivo", "tarjeta", "transferencia", "deposito"];
+const CURP_DICTIONARY = "0123456789ABCDEFGHIJKLMNÑOPQRSTUVWXYZ";
+
+function curpCheckDigit(firstSeventeenCharacters) {
+  const sum = [...firstSeventeenCharacters].reduce(
+    (total, character, position) =>
+      total + CURP_DICTIONARY.indexOf(character) * (18 - position),
+    0,
+  );
+  return String((10 - (sum % 10)) % 10);
+}
+
+function demoBirthYear(level, grade) {
+  if (level === "preescolar") return cycleStartYear - (grade + 2);
+  if (level === "primaria") return cycleStartYear - (grade + 5);
+  if (level === "secundaria") return cycleStartYear - (grade + 11);
+  return cycleStartYear - (14 + Math.ceil(grade / 2));
+}
+
+function generateDemoCurp(index, sex, level, grade) {
+  const year = String(demoBirthYear(level, grade)).slice(-2);
+  const month = String((index % 12) + 1).padStart(2, "0");
+  const day = String((Math.floor(index / 12) % 28) + 1).padStart(2, "0");
+  const firstSeventeen = `DEMO${year}${month}${day}${sex === "mujer" ? "M" : "H"}DFBCDA`;
+  return `${firstSeventeen}${curpCheckDigit(firstSeventeen)}`;
+}
 
 function temporaryPassword(firstName, enrollment) {
   return `${firstName.slice(0, 2).toUpperCase()}${enrollment.slice(-4)}`;
@@ -179,7 +204,8 @@ function buildStudentDefinitions() {
           const name = FIRST_NAMES[index % FIRST_NAMES.length];
           const paternal = PATERNAL_SURNAMES[(index * 5) % PATERNAL_SURNAMES.length];
           const maternal = MATERNAL_SURNAMES[(index * 7 + 3) % MATERNAL_SURNAMES.length];
-          const enrollment = `DEMO${level.code}${String(grade).padStart(2, "0")}${group}${String(seat).padStart(2, "0")}`;
+          const sex = index % 2 === 0 ? "mujer" : "hombre";
+          const enrollment = generateDemoCurp(index, sex, level.value, grade);
           const scholarship = index % 9 === 3;
           definitions.push({
             index,
@@ -192,7 +218,7 @@ function buildStudentDefinitions() {
             nivel: level.value,
             grado: grade,
             grupo: group,
-            sexo: index % 2 === 0 ? "mujer" : "hombre",
+            sexo: sex,
             scholarship,
             scholarshipPercentage: scholarship ? 25 : 0,
             scholarshipScope: scholarship ? "mensualidad" : null,
@@ -271,6 +297,7 @@ async function run() {
         apellido_paterno: definition.apellido_paterno,
         apellido_materno: definition.apellido_materno,
         matricula: definition.matricula,
+        fecha_alta: `${cycleStartYear}-08-01`,
         nivel: definition.nivel,
         grado: definition.grado,
         grupo: definition.grupo,
@@ -307,6 +334,7 @@ async function run() {
       observaciones: "Asignación ficticia para pruebas integrales.",
       porcentaje_aplicado: student.scholarshipPercentage,
       alcance_aplicado: student.scholarshipScope,
+      vigencia_desde: `${cycleStartYear}-08-01`,
     }));
   await insertInBatches("alumnos_becas", scholarshipRows);
 
@@ -373,6 +401,7 @@ async function run() {
       monto: getExpectedCost(student, "inscripcion"),
       tipo_pago: "inscripcion",
       metodo_pago: PAYMENT_METHODS[student.index % PAYMENT_METHODS.length],
+      facturado: student.index % 3 === 0,
       mes: "agosto",
       anio: cycleStartYear,
       fecha_pago: isoDate(7, 3 + (student.index % 20), 14),
@@ -382,6 +411,7 @@ async function run() {
       monto: getExpectedCost(student, "mensualidad"),
       tipo_pago: "mensualidad",
       metodo_pago: PAYMENT_METHODS[(student.index + 1) % PAYMENT_METHODS.length],
+      facturado: student.index % 4 === 0,
       mes: "agosto",
       anio: cycleStartYear,
       fecha_pago: isoDate(7, 5 + (student.index % 18), 16),
@@ -394,6 +424,7 @@ async function run() {
         monto: getExpectedCost(student, "mensualidad") / 2,
         tipo_pago: "mensualidad",
         metodo_pago: PAYMENT_METHODS[(student.index + 2) % PAYMENT_METHODS.length],
+        facturado: student.index % 5 === 0,
         mes: "septiembre",
         anio: cycleStartYear,
         fecha_pago: isoDate(8, 1 + (student.index % 5), 13),
@@ -404,6 +435,7 @@ async function run() {
         monto: getExpectedCost(student, "mensualidad"),
         tipo_pago: "mensualidad",
         metodo_pago: PAYMENT_METHODS[(student.index + 2) % PAYMENT_METHODS.length],
+        facturado: student.index % 5 === 0,
         mes: "septiembre",
         anio: cycleStartYear,
         fecha_pago: isoDate(8, 1 + (student.index % 5), 13),
@@ -448,7 +480,7 @@ async function run() {
 
   const credentialsPath = resolve(process.cwd(), "datos-demo-credenciales.csv");
   const csv = [
-    "matricula,nombre,email,password,nivel,grado,grupo",
+    "curp,nombre,email,password,nivel,grado,grupo",
     ...createdStudents.map((student) => [
       student.matricula,
       `${student.nombre} ${student.apellido_paterno} ${student.apellido_materno}`,

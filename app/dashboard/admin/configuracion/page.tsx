@@ -17,6 +17,7 @@ import {
   invalidateAdminData,
   loadConfigurations as fetchConfigurations,
 } from "@/lib/admin-data";
+import { AdminPasswordForm } from "@/components/AdminPasswordForm";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   ConfiguracionCostos,
@@ -248,14 +249,21 @@ export default function ConfigurationPage() {
       <div>
         <p className="text-sm font-medium text-sky-600">Administración</p>
         <h1 className="mt-1 text-3xl font-bold text-slate-950">
-          Configuración de costos
+          Configuración
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          Define costos y la fecha límite de inscripción para el ciclo agosto–julio.
+          Administra los costos escolares y la seguridad de tu cuenta.
         </p>
       </div>
 
       <div className="mt-8">
+        <h2 className="text-xl font-semibold text-slate-950">Costos escolares</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Define los importes y la fecha límite de inscripción para cada ciclo.
+        </p>
+      </div>
+
+      <div className="mt-6">
         <p
           id="cycle-label"
           className="text-sm font-medium text-slate-700"
@@ -301,7 +309,7 @@ export default function ConfigurationPage() {
         </p>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {levels.map(
           (itemLevel) => {
             const configuration = configurations.find(
@@ -467,6 +475,8 @@ export default function ConfigurationPage() {
           </button>
         </div>
       </form>
+
+      <AdminPasswordForm />
 
       {pendingCosts && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-[2px]" role="presentation">

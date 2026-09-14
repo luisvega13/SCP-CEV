@@ -1,12 +1,20 @@
-import { getCurrentAcademicCycle } from "@/lib/academic";
+import {
+  getCurrentAcademicCycle,
+  getCurrentAcademicMonthIndex,
+} from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   AdminDashboardOverview,
   Alumno,
+  BecadosPorTipo,
+  CarteraVencidaAlumno,
   ConfiguracionCostos,
-  EstadoCuenta,
+  ConsultaCarteraVencida,
+  CorteDiario,
+  DesgloseAlumnos,
   FinancialReportKpis,
   Pago,
+  ResumenFinancieroMensual,
   StudentFilterOptions,
 } from "@/types/database";
 
@@ -62,7 +70,10 @@ export type StudentListItem = Pick<
   | "deuda_inscripcion"
   | "ciclo_grado_actual"
   | "promocion_habilitada"
->;
+> & {
+  /** Saldo cuya fecha limite ya paso; no incluye cargos futuros. */
+  saldo_vencido: number;
+};
 
 export type RecentPayment = Pick<
   Pago,
@@ -78,30 +89,8 @@ export type RecentPayment = Pick<
   >;
 };
 
-export type FinancialAccountRow = Pick<
-  EstadoCuenta,
-  | "id"
-  | "concepto"
-  | "tipo_pago"
-  | "monto_esperado"
-  | "monto_pagado"
-  | "fecha_limite"
-  | "estatus"
-> & {
-  alumnos: Pick<
-    Alumno,
-    | "id"
-    | "nombre"
-    | "apellido_paterno"
-    | "apellido_materno"
-    | "nivel"
-    | "grado"
-    | "grupo"
-  >;
-};
-
 export type FinancialReportData = {
-  rows: FinancialAccountRow[];
+  rows: CarteraVencidaAlumno[];
   kpis: FinancialReportKpis;
 };
 
@@ -112,7 +101,7 @@ export type FinancialReportQuery = {
   grade: string;
   group: string;
   paymentType: string;
-  overdueOnly: boolean;
+  search: string;
 };
 
 export type StudentDirectoryQuery = {
@@ -180,7 +169,38 @@ export function loadStudents(params: Partial<StudentDirectoryQuery> = {}) {
     const { data, count, error } = await query;
 
     if (error) throw error;
-    return { students: data, total: count ?? 0 };
+    const students = data ?? [];
+    if (students.length === 0) return { students: [], total: count ?? 0 };
+
+    const today = getTodayInMexico();
+    const { data: overdueRows, error: overdueError } = await supabase
+      .from("estado_cuenta")
+      .select("alumno_id, monto_esperado, monto_pagado")
+      .in("alumno_id", students.map((student) => student.id))
+      // La fecha de corte se considera vencida a partir del dia siguiente.
+      .lt("fecha_limite", today);
+
+    if (overdueError) throw overdueError;
+
+    const overdueByStudent = new Map<string, number>();
+    for (const row of overdueRows ?? []) {
+      const pending = Math.max(
+        Number(row.monto_esperado) - Number(row.monto_pagado),
+        0,
+      );
+      overdueByStudent.set(
+        row.alumno_id,
+        (overdueByStudent.get(row.alumno_id) ?? 0) + pending,
+      );
+    }
+
+    return {
+      students: students.map((student) => ({
+        ...student,
+        saldo_vencido: overdueByStudent.get(student.id) ?? 0,
+      })),
+      total: count ?? 0,
+    };
   });
 }
 
@@ -195,19 +215,49 @@ export function loadStudentFilterOptions() {
   });
 }
 
-export function loadRecentPayments() {
-  return loadOnce("payments:recent", async () => {
-    const supabase = getSupabaseBrowserClient();
-    const { data, error } = await supabase
-      .from("pagos")
-      .select(
-        "id, monto, tipo_pago, metodo_pago, fecha_pago, mes, anio, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, matricula)",
-      )
-      .order("fecha_pago", { ascending: false })
-      .limit(20);
+function addCalendarDays(date: string, days: number) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
 
-    if (error) throw error;
-    return data as RecentPayment[];
+function getTodayInMexico() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+export function loadRecentPayments(date = getTodayInMexico()) {
+  return loadOnce(`payments:day:${date}`, async () => {
+    const supabase = getSupabaseBrowserClient();
+    const nextDate = addCalendarDays(date, 1);
+    const start = new Date(`${date}T00:00:00-06:00`).toISOString();
+    const end = new Date(`${nextDate}T00:00:00-06:00`).toISOString();
+    const batchSize = 1_000;
+    const payments: RecentPayment[] = [];
+
+    for (let from = 0; ; from += batchSize) {
+      const { data, error } = await supabase
+        .from("pagos")
+        .select(
+          "id, monto, tipo_pago, metodo_pago, fecha_pago, mes, anio, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, matricula)",
+        )
+        .gte("fecha_pago", start)
+        .lt("fecha_pago", end)
+        .order("fecha_pago", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, from + batchSize - 1);
+
+      if (error) throw error;
+      const batch = data as RecentPayment[];
+      payments.push(...batch);
+      if (batch.length < batchSize) break;
+    }
+
+    return payments;
   });
 }
 
@@ -243,8 +293,57 @@ export function loadDashboardMetrics(cycle = getCurrentAcademicCycle()) {
   });
 }
 
+export function loadMonthlyFinancialSummary(
+  cycle = getCurrentAcademicCycle(),
+) {
+  return loadOnce(`reports:monthly-summary:${cycle}`, async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data, error } = await supabase.rpc(
+      "obtener_resumen_financiero_mensual",
+      { p_ciclo_escolar: cycle },
+    );
+    if (error) throw error;
+    return data as ResumenFinancieroMensual;
+  });
+}
+
+export function loadDailyClosing(date = getTodayInMexico()) {
+  return loadOnce(`dashboard:daily-closing:${date}`, async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data, error } = await supabase.rpc("obtener_corte_diario", {
+      p_fecha: date,
+    });
+    if (error) throw error;
+    return data as CorteDiario;
+  });
+}
+
+export function loadStudentBreakdown(cycle = getCurrentAcademicCycle()) {
+  return loadOnce(`dashboard:student-breakdown:${cycle}`, async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data, error } = await supabase.rpc("obtener_desglose_alumnos", {
+      p_ciclo_escolar: cycle,
+    });
+    if (error) throw error;
+    return data as DesgloseAlumnos;
+  });
+}
+
+export function loadScholarshipBreakdown(cycle = getCurrentAcademicCycle()) {
+  return loadOnce(`dashboard:scholarships-by-type:${cycle}`, async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data, error } = await supabase.rpc("obtener_becados_por_tipo", {
+      p_ciclo_escolar: cycle,
+    });
+    if (error) throw error;
+    return data as BecadosPorTipo;
+  });
+}
+
 export function loadFinancialReportKpis() {
-  return loadOnce("reports:kpis", async () => {
+  const cycle = getCurrentAcademicCycle();
+  const monthIndex = getCurrentAcademicMonthIndex();
+  return loadOnce(`reports:kpis:${cycle}:${monthIndex}`, async () => {
     const supabase = getSupabaseBrowserClient();
     const { error: refreshError } = await supabase.rpc(
       "actualizar_estatus_estado_cuenta",
@@ -252,13 +351,24 @@ export function loadFinancialReportKpis() {
     );
     if (refreshError) throw refreshError;
 
-    const kpisResult = await supabase.rpc("obtener_kpis_reportes_financieros", {});
+    const [kpisResult, monthlyResult] = await Promise.all([
+      supabase.rpc("obtener_kpis_reportes_financieros", {}),
+      supabase.rpc("obtener_resumen_financiero_mensual", {
+        p_ciclo_escolar: cycle,
+      }),
+    ]);
     if (kpisResult.error) throw kpisResult.error;
+    if (monthlyResult.error) throw monthlyResult.error;
+
+    const currentMonth = monthlyResult.data.meses[monthIndex];
+    if (!currentMonth) {
+      throw new Error("No fue posible identificar el periodo financiero actual.");
+    }
 
     return {
-      total_recaudado: Number(kpisResult.data.total_recaudado),
-      saldo_actual_vencido: Number(kpisResult.data.saldo_actual_vencido),
-      proyeccion_ingresos: Number(kpisResult.data.proyeccion_ingresos),
+      proyeccion_mensual: Number(currentMonth.proyectado),
+      pagado_aplicado_periodo: Number(currentMonth.pagado),
+      adeudo_pendiente_mes: Number(currentMonth.adeudo),
       alumnos_con_adeudo: Number(kpisResult.data.alumnos_con_adeudo),
     } satisfies FinancialReportKpis;
   });
@@ -266,28 +376,24 @@ export function loadFinancialReportKpis() {
 
 export function loadFinancialReportPage(params: FinancialReportQuery) {
   return loadOnce(`reports:page:${JSON.stringify(params)}`, async () => {
-    const supabase = getSupabaseBrowserClient();
-    const from = (params.page - 1) * params.pageSize;
-    let query = supabase
-      .from("estado_cuenta")
-      .select(
-        "id, concepto, tipo_pago, monto_esperado, monto_pagado, fecha_limite, estatus, alumnos!inner(id, nombre, apellido_paterno, apellido_materno, nivel, grado, grupo)",
-        { count: "exact" },
-      )
-      .order("fecha_limite", { ascending: true })
-      .range(from, from + params.pageSize - 1);
-
-    if (params.level !== "todos") query = query.eq("alumnos.nivel", params.level as Alumno["nivel"]);
-    if (params.grade !== "todos") query = query.eq("alumnos.grado", Number(params.grade));
-    if (params.group !== "todos") query = query.eq("alumnos.grupo", params.group);
-    if (params.paymentType !== "todos") query = query.eq("tipo_pago", params.paymentType as Pago["tipo_pago"]);
-    if (params.overdueOnly) query = query.eq("estatus", "vencido");
-
-    const { data, count, error } = await query;
+    const { data, error } = await getSupabaseBrowserClient().rpc(
+      "consultar_cartera_vencida_alumnos",
+      {
+        p_nivel: params.level === "todos" ? null : params.level as Alumno["nivel"],
+        p_grado: params.grade === "todos" ? null : Number(params.grade),
+        p_grupo: params.group === "todos" ? null : params.group,
+        p_tipo_pago: params.paymentType === "todos" ? null : params.paymentType as Pago["tipo_pago"],
+        p_busqueda: params.search,
+        p_limite: params.pageSize,
+        p_offset: (params.page - 1) * params.pageSize,
+      },
+    );
     if (error) throw error;
+    const result = data as ConsultaCarteraVencida;
     return {
-      rows: data as FinancialAccountRow[],
-      total: count ?? 0,
+      rows: result.registros,
+      total: result.total_alumnos,
+      totalBalance: result.total_saldo_vencido,
     };
   });
 }
@@ -295,7 +401,13 @@ export function loadFinancialReportPage(params: FinancialReportQuery) {
 export function preloadAdminRoute(href: string) {
   switch (href) {
     case "/dashboard/admin":
-      return loadDashboardMetrics();
+      return Promise.all([
+        loadDashboardMetrics(),
+        loadMonthlyFinancialSummary(),
+        loadDailyClosing(),
+        loadStudentBreakdown(),
+        loadScholarshipBreakdown(),
+      ]);
     case "/dashboard/admin/alumnos":
       return loadStudents();
     case "/dashboard/admin/pagos":
@@ -310,7 +422,7 @@ export function preloadAdminRoute(href: string) {
           grade: "todos",
           group: "todos",
           paymentType: "todos",
-          overdueOnly: false,
+          search: "",
         }),
       ]);
     case "/dashboard/admin/configuracion":

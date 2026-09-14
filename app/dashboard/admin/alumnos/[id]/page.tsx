@@ -4,7 +4,15 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  KeyRound,
+  LoaderCircle,
+  Mail,
+} from "lucide-react";
 import { PaymentHistory } from "@/components/PaymentHistory";
 import { FiscalResponsibleSection } from "@/components/FiscalResponsibleSection";
 import { GuardianSection } from "@/components/GuardianSection";
@@ -21,9 +29,16 @@ import {
   getReEnrollmentLevel,
 } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { CURP_HELP_TEXT, isValidCurp, normalizeCurp } from "@/lib/curp";
 import { PAYMENT_METHOD_OPTIONS } from "@/lib/payments";
+import { downloadPaymentReceipt } from "@/lib/payment-receipt-client";
+import {
+  getDefaultStudentPassword,
+  getStudentAccessKey,
+} from "@/lib/student-access";
 import {
   getDiscountedCost,
+  getScholarshipDiscountLabel,
   getScholarshipScopeLabel,
   scholarshipAppliesTo,
   type AppliedScholarship,
@@ -31,6 +46,7 @@ import {
 import type {
   Alumno,
   ConfiguracionCostos,
+  EstadoCuenta,
   MetodoPago,
   Pago,
 } from "@/types/database";
@@ -70,6 +86,7 @@ export default function StudentDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<MetodoPago>("efectivo");
+  const [invoiced, setInvoiced] = useState(false);
   const [cycle, setCycle] = useState(currentAcademicCycle);
   const [configuration, setConfiguration] =
     useState<ConfiguracionCostos | null>(null);
@@ -79,15 +96,24 @@ export default function StudentDetailPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [payments, setPayments] = useState<Pago[]>([]);
+  const [accountCharges, setAccountCharges] = useState<EstadoCuenta[]>([]);
   const [isPaymentsLoading, setIsPaymentsLoading] = useState(true);
   const [paymentDataVersion, setPaymentDataVersion] = useState(0);
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
+  const [today] = useState(() => new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date()));
   const [isEditing, setIsEditing] = useState(
     () => searchParams.get("editar") === "1",
   );
   const [editName, setEditName] = useState("");
   const [editPaternalSurname, setEditPaternalSurname] = useState("");
   const [editMaternalSurname, setEditMaternalSurname] = useState("");
+  const [editCurp, setEditCurp] = useState("");
+  const [curpPassword, setCurpPassword] = useState("");
   const [editLevel, setEditLevel] = useState<Alumno["nivel"]>("primaria");
   const [editGrade, setEditGrade] = useState("1");
   const [editGroup, setEditGroup] = useState("");
@@ -95,6 +121,13 @@ export default function StudentDetailPage() {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [profileMessage, setProfileMessage] = useState("");
   const [profileError, setProfileError] = useState("");
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [accessAdminPassword, setAccessAdminPassword] = useState("");
+  const [accessError, setAccessError] = useState("");
+  const [isResettingAccess, setIsResettingAccess] = useState(false);
+  const [copiedAccessField, setCopiedAccessField] = useState<
+    "email" | "password" | null
+  >(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -116,6 +149,7 @@ export default function StudentDetailPage() {
             setEditName(data.nombre);
             setEditPaternalSurname(data.apellido_paterno);
             setEditMaternalSurname(data.apellido_materno);
+            setEditCurp(data.matricula);
             setEditLevel(data.nivel);
             setEditGrade(String(data.grado));
             setEditGroup(data.grupo);
@@ -138,15 +172,28 @@ export default function StudentDetailPage() {
     async function loadPayments() {
       try {
         const supabase = getSupabaseBrowserClient();
-        const { data, error: queryError } = await supabase
-          .from("pagos")
-          .select("*")
-          .eq("alumno_id", studentId)
-          .eq("ciclo_escolar", cycle)
-          .order("fecha_pago", { ascending: false });
+        const startYear = Number(cycle.split("-")[0]);
+        const [paymentsResult, accountResult] = await Promise.all([
+          supabase
+            .from("pagos")
+            .select("*")
+            .eq("alumno_id", studentId)
+            .eq("ciclo_escolar", cycle)
+            .order("fecha_pago", { ascending: false }),
+          supabase
+            .from("estado_cuenta")
+            .select("*")
+            .eq("alumno_id", studentId)
+            .gte("fecha_limite", `${startYear}-08-01`)
+            .lt("fecha_limite", `${startYear + 1}-08-01`),
+        ]);
 
-        if (queryError) throw queryError;
-        if (isMounted) setPayments(data);
+        if (paymentsResult.error) throw paymentsResult.error;
+        if (accountResult.error) throw accountResult.error;
+        if (isMounted) {
+          setPayments(paymentsResult.data);
+          setAccountCharges(accountResult.data);
+        }
       } catch (caughtError) {
         if (isMounted) {
           setPaymentsError(
@@ -185,7 +232,7 @@ export default function StudentDetailPage() {
           .maybeSingle(),
         supabase
           .from("alumnos_becas")
-          .select("porcentaje_aplicado, alcance_aplicado, becas!inner(nombre)")
+          .select("tipo_descuento_aplicado, porcentaje_aplicado, monto_fijo_aplicado, alcance_aplicado, vigencia_desde, becas!inner(nombre)")
           .eq("alumno_id", student.id)
           .eq("ciclo_escolar", cycle)
           .maybeSingle(),
@@ -224,6 +271,7 @@ export default function StudentDetailPage() {
     const startYear = Number(cycle.split("-")[0]);
     setCycle(createAcademicCycle(startYear + direction));
     setPayments([]);
+    setAccountCharges([]);
     setIsPaymentsLoading(true);
     setPaymentsError("");
     setConfiguration(null);
@@ -247,6 +295,8 @@ export default function StudentDetailPage() {
     setEditName(student.nombre);
     setEditPaternalSurname(student.apellido_paterno);
     setEditMaternalSurname(student.apellido_materno);
+    setEditCurp(student.matricula);
+    setCurpPassword("");
     setEditLevel(student.nivel);
     setEditGrade(String(student.grado));
     setEditGroup(student.grupo);
@@ -264,9 +314,11 @@ export default function StudentDetailPage() {
     const normalizedMaternalSurname = editMaternalSurname
       .trim()
       .replace(/\s+/g, " ");
+    const normalizedCurp = normalizeCurp(editCurp);
     const normalizedGroup = editGroup.trim().toUpperCase();
     const numericGrade = Number(editGrade);
     const maximumGrade = getMaximumGrade(editLevel);
+    const curpChanged = normalizedCurp !== student?.matricula;
 
     setProfileError("");
     setProfileMessage("");
@@ -286,11 +338,34 @@ export default function StudentDetailPage() {
       setProfileError("Selecciona un grado válido para el nivel indicado.");
       return;
     }
+    if (curpChanged && !isValidCurp(normalizedCurp)) {
+      setProfileError("La CURP no es válida. Revisa los 18 caracteres y el dígito verificador.");
+      return;
+    }
+    if (curpChanged && !curpPassword) {
+      setProfileError("Ingresa tu contraseña para confirmar el cambio de CURP.");
+      return;
+    }
 
     setIsUpdating(true);
 
     try {
       const supabase = getSupabaseBrowserClient();
+      if (curpChanged) {
+        const response = await fetch("/api/admin/students/curp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId,
+            curp: normalizedCurp,
+            password: curpPassword,
+          }),
+        });
+        const result = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(result.error || "No fue posible modificar la CURP.");
+        }
+      }
       const { data, error: updateError } = await supabase
         .from("alumnos")
         .update({
@@ -308,6 +383,7 @@ export default function StudentDetailPage() {
       if (updateError) throw updateError;
 
       invalidateAdminData("students:");
+      invalidateAdminData("payments:");
       invalidateAdminData("reports:");
       setStudent(data);
       setIsEditing(false);
@@ -363,6 +439,86 @@ export default function StudentDetailPage() {
     }
   }
 
+  async function copyAccessValue(
+    field: "email" | "password",
+    value: string,
+  ) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedAccessField(field);
+      window.setTimeout(() => {
+        setCopiedAccessField((current) => (current === field ? null : current));
+      }, 1800);
+    } catch {
+      setAccessError("No fue posible copiar el dato. Selecciónalo manualmente.");
+    }
+  }
+
+  async function handleAccessPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!accessAdminPassword) {
+      setAccessError("Ingresa tu contraseña para autorizar el cambio.");
+      return;
+    }
+
+    setAccessError("");
+    setIsResettingAccess(true);
+
+    try {
+      const response = await fetch("/api/admin/students/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId,
+          password: accessAdminPassword,
+        }),
+      });
+      const responseText = await response.text();
+      let result: {
+        error?: string;
+        email?: string;
+        temporaryPassword?: string;
+        passwordInitials?: string;
+      } = {};
+      try {
+        result = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        result = {};
+      }
+
+      if (!response.ok || !result.temporaryPassword) {
+        throw new Error(
+          result.error || "No fue posible generar la contraseña temporal.",
+        );
+      }
+
+      setAccessAdminPassword("");
+      setShowPasswordReset(false);
+      setStudent((current) =>
+        current
+          ? {
+              ...current,
+              correo_acceso: result.email ?? current.correo_acceso,
+              iniciales_clave_temporal:
+                result.passwordInitials ?? current.iniciales_clave_temporal,
+              contrasena_temporal_activa: true,
+              contrasena_actualizada_at: new Date().toISOString(),
+            }
+          : current,
+      );
+      setProfileMessage("La contraseña se restableció al valor predeterminado.");
+    } catch (caughtError) {
+      setAccessError(
+        getErrorMessage(
+          caughtError,
+          "No fue posible generar la contraseña temporal.",
+        ),
+      );
+    } finally {
+      setIsResettingAccess(false);
+    }
+  }
+
   async function handlePaymentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const numericAmount = Number(amount);
@@ -396,14 +552,19 @@ export default function StudentDetailPage() {
 
     try {
       const supabase = getSupabaseBrowserClient();
-      const { error: insertError } = await supabase.from("pagos").insert({
-        alumno_id: studentId,
-        monto: numericAmount,
-        tipo_pago: activePaymentType,
-        metodo_pago: paymentMethod,
-        mes: activeMonth,
-        anio: activeYear,
-      });
+      const { data: insertedPayment, error: insertError } = await supabase
+        .from("pagos")
+        .insert({
+          alumno_id: studentId,
+          monto: numericAmount,
+          tipo_pago: activePaymentType,
+          metodo_pago: paymentMethod,
+          facturado: invoiced,
+          mes: activeMonth,
+          anio: activeYear,
+        })
+        .select("id, folio_comprobante")
+        .single();
 
       if (insertError) throw insertError;
 
@@ -411,7 +572,8 @@ export default function StudentDetailPage() {
       invalidateAdminData("dashboard:");
       invalidateAdminData("reports:");
       setIsPaymentsLoading(true);
-      const [studentResult, paymentsResult] = await Promise.all([
+      const startYear = Number(cycle.split("-")[0]);
+      const [studentResult, paymentsResult, accountResult] = await Promise.all([
         supabase.from("alumnos").select("*").eq("id", studentId).single(),
         supabase
           .from("pagos")
@@ -419,6 +581,12 @@ export default function StudentDetailPage() {
           .eq("alumno_id", studentId)
           .eq("ciclo_escolar", cycle)
           .order("fecha_pago", { ascending: false }),
+        supabase
+          .from("estado_cuenta")
+          .select("*")
+          .eq("alumno_id", studentId)
+          .gte("fecha_limite", `${startYear}-08-01`)
+          .lt("fecha_limite", `${startYear + 1}-08-01`),
       ]);
 
       if (studentResult.error) {
@@ -437,8 +605,31 @@ export default function StudentDetailPage() {
         setPayments(paymentsResult.data);
       }
 
+      if (accountResult.error) {
+        setPaymentsError(
+          "El pago se guardó, pero no fue posible actualizar el estado de cuenta en pantalla.",
+        );
+      } else {
+        setAccountCharges(accountResult.data);
+      }
+
+      let receiptDownloaded = true;
+      try {
+        await downloadPaymentReceipt(
+          insertedPayment.id,
+          insertedPayment.folio_comprobante,
+        );
+      } catch {
+        receiptDownloaded = false;
+      }
+
       setAmount("");
-      setSuccessMessage("El pago se registró correctamente.");
+      setInvoiced(false);
+      setSuccessMessage(
+        receiptDownloaded
+          ? `El pago se registró y se descargó el comprobante ${insertedPayment.folio_comprobante}.`
+          : `El pago se registró correctamente. El comprobante ${insertedPayment.folio_comprobante} está disponible en el historial.`,
+      );
     } catch (caughtError) {
       setFormError(
         getErrorMessage(caughtError, "No fue posible registrar el pago."),
@@ -477,13 +668,28 @@ export default function StudentDetailPage() {
   }
 
   const effectiveEnrollmentCost = configuration
-    ? getDiscountedCost(configuration.costo_inscripcion, scholarship, "inscripcion")
-    : 0;
-  const effectiveMonthlyCost = configuration
-    ? getDiscountedCost(configuration.costo_mensualidad, scholarship, "mensualidad")
+    ? getDiscountedCost(configuration.costo_inscripcion, scholarship, "inscripcion", {
+        month: "agosto",
+        year: getAcademicMonthYear("agosto", cycle),
+      })
     : 0;
   const monthlyStatuses = ACADEMIC_MONTHS.map((academicMonth) => {
     const year = getAcademicMonthYear(academicMonth.value, cycle);
+    const charge = accountCharges.find(
+      (item) =>
+        item.tipo_pago === "mensualidad" &&
+        item.mes === academicMonth.value &&
+        item.anio === year,
+    );
+    const calculatedCost = configuration
+      ? getDiscountedCost(
+          configuration.costo_mensualidad,
+          scholarship,
+          "mensualidad",
+          { month: academicMonth.value, year },
+        )
+      : 0;
+    const effectiveCost = charge?.monto_esperado ?? calculatedCost;
     const paidAmount = payments
       .filter(
         (payment) =>
@@ -496,14 +702,48 @@ export default function StudentDetailPage() {
     return {
       ...academicMonth,
       year,
+      effectiveCost,
       paidAmount,
+      pendingAmount: Math.max(
+        effectiveCost - (charge?.monto_pagado ?? paidAmount),
+        0,
+      ),
+      isApplicable: Boolean(charge),
+      isDue: Boolean(charge && charge.fecha_limite < today),
       isPaid:
-        configuration !== null &&
-        paidAmount >= effectiveMonthlyCost,
+        Boolean(charge) &&
+        (charge?.monto_pagado ?? paidAmount) >= effectiveCost,
     };
   });
-  const nextPendingMonth = monthlyStatuses.find((month) => !month.isPaid);
-  const isEnrollmentPending = student.deuda_inscripcion > 0;
+  const nextPendingMonth = monthlyStatuses.find(
+    (month) => month.isApplicable && !month.isPaid,
+  );
+  const overdueMonthlyBalance = monthlyStatuses
+    .filter((month) => month.isDue && !month.isPaid)
+    .reduce((total, month) => total + month.pendingAmount, 0);
+  const effectiveMonthlyCost = nextPendingMonth?.effectiveCost ?? configuration?.costo_mensualidad ?? 0;
+  const enrollmentYear = getAcademicMonthYear("agosto", cycle);
+  const enrollmentCharge = accountCharges.find(
+    (charge) =>
+      charge.tipo_pago === "inscripcion" &&
+      charge.mes === "agosto" &&
+      charge.anio === enrollmentYear,
+  );
+  const enrollmentPaidFromHistory = payments
+    .filter(
+      (payment) =>
+        payment.tipo_pago === "inscripcion" &&
+        payment.mes === "agosto" &&
+        payment.anio === enrollmentYear,
+    )
+    .reduce((total, payment) => total + payment.monto, 0);
+  const enrollmentCost = enrollmentCharge?.monto_esperado ?? effectiveEnrollmentCost;
+  const enrollmentPaidAmount = enrollmentCharge?.monto_pagado ?? enrollmentPaidFromHistory;
+  const enrollmentPendingAmount = Math.max(
+    enrollmentCost - enrollmentPaidAmount,
+    0,
+  );
+  const isEnrollmentPending = enrollmentPendingAmount >= 0.01;
   const activePaymentType = isEnrollmentPending
     ? ("inscripcion" as const)
     : nextPendingMonth
@@ -517,11 +757,11 @@ export default function StudentDetailPage() {
     : null;
   const activeCost = configuration
     ? isEnrollmentPending
-      ? effectiveEnrollmentCost
+      ? enrollmentCost
       : effectiveMonthlyCost
     : 0;
   const activePaidAmount = isEnrollmentPending
-    ? Math.max(activeCost - student.deuda_inscripcion, 0)
+    ? enrollmentPaidAmount
     : nextPendingMonth?.paidAmount ?? activeCost;
   const activePendingAmount = Math.max(activeCost - activePaidAmount, 0);
   const activeConceptLabel = isEnrollmentPending
@@ -636,6 +876,40 @@ export default function StudentDetailPage() {
               className={fieldClass}
             />
           </div>
+          <div className="sm:col-span-2">
+            <label htmlFor="editCurp" className="text-sm font-medium text-slate-700">
+              CURP
+            </label>
+            <input
+              id="editCurp"
+              type="text"
+              required
+              maxLength={18}
+              autoCapitalize="characters"
+              autoComplete="off"
+              value={editCurp}
+              onChange={(event) => setEditCurp(normalizeCurp(event.target.value))}
+              className={fieldClass}
+            />
+            <p className="mt-1 text-xs text-slate-500">{CURP_HELP_TEXT} El correo de acceso existente no cambia.</p>
+          </div>
+          {student && normalizeCurp(editCurp) !== student.matricula && (
+            <div className="sm:col-span-2">
+              <label htmlFor="curpPassword" className="text-sm font-medium text-slate-700">
+                Contraseña del administrador
+              </label>
+              <input
+                id="curpPassword"
+                type="password"
+                required
+                autoComplete="current-password"
+                value={curpPassword}
+                onChange={(event) => setCurpPassword(event.target.value)}
+                className={fieldClass}
+              />
+              <p className="mt-1 text-xs text-slate-500">Necesaria para autorizar y auditar el cambio de CURP.</p>
+            </div>
+          )}
           <div>
             <label
               htmlFor="editMaternalSurname"
@@ -815,12 +1089,172 @@ export default function StudentDetailPage() {
           <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50 sm:col-span-2">
             <p className="text-sm font-medium text-emerald-800">Beca aplicada</p>
             <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-              <div><p className="text-xl font-bold text-emerald-950">{scholarship.becas.nombre} · {Number(scholarship.porcentaje_aplicado).toFixed(2)}%</p><p className="mt-1 text-xs text-emerald-700">Aplica a {getScholarshipScopeLabel(scholarship.alcance_aplicado).toLocaleLowerCase("es-MX")} durante {cycle}.</p></div>
+              <div><p className="text-xl font-bold text-emerald-950">{scholarship.becas.nombre} · {getScholarshipDiscountLabel(scholarship)}</p><p className="mt-1 text-xs text-emerald-700">Aplica a {getScholarshipScopeLabel(scholarship.alcance_aplicado).toLocaleLowerCase("es-MX")} desde el {new Intl.DateTimeFormat("es-MX", { dateStyle: "long", timeZone: "America/Mexico_City" }).format(new Date(`${scholarship.vigencia_desde}T12:00:00-06:00`))}. Los meses anteriores conservan su costo original.</p></div>
               {configuration && <div className="text-right text-xs text-emerald-800">{scholarshipAppliesTo(scholarship, "inscripcion") && <p>Inscripción: <span className="line-through">{currencyFormatter.format(configuration.costo_inscripcion)}</span> <strong className="ml-1 no-underline">{currencyFormatter.format(effectiveEnrollmentCost)}</strong></p>}{scholarshipAppliesTo(scholarship, "mensualidad") && <p className="mt-1">Mensualidad: <span className="line-through">{currencyFormatter.format(configuration.costo_mensualidad)}</span> <strong className="ml-1 no-underline">{currencyFormatter.format(effectiveMonthlyCost)}</strong></p>}</div>}
             </div>
           </article>
         )}
       </div>
+
+      <section className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-sky-600" aria-hidden="true" />
+              <h2 className="text-xl font-semibold text-slate-950">Datos de acceso</h2>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              Credenciales utilizadas por el alumno para ingresar al portal.
+            </p>
+          </div>
+          {!student.contrasena_temporal_activa && !showPasswordReset && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowPasswordReset(true);
+                setAccessError("");
+              }}
+              disabled={!student.usuario_id}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Restablecer contraseña predeterminada
+            </button>
+          )}
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="min-w-0 rounded-lg border border-slate-200 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <Mail className="h-4 w-4" aria-hidden="true" /> Clave de acceso
+                </p>
+                <p className="mt-2 truncate text-sm font-semibold text-slate-900" title={student.correo_acceso ?? undefined}>
+                  {student.correo_acceso
+                    ? getStudentAccessKey(student.correo_acceso)
+                    : "Sin clave de acceso registrada"}
+                </p>
+              </div>
+              {student.correo_acceso && (
+                <button
+                  type="button"
+                  onClick={() => void copyAccessValue("email", getStudentAccessKey(student.correo_acceso!))}
+                  aria-label="Copiar clave de acceso"
+                  className="shrink-0 rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-sky-700"
+                >
+                  {copiedAccessField === "email" ? (
+                    <Check className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+                  ) : (
+                    <Copy className="h-4 w-4" aria-hidden="true" />
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="min-w-0 rounded-lg border border-slate-200 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Contraseña
+            </p>
+            {student.contrasena_temporal_activa && student.correo_acceso ? (
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <div>
+                  <code className="text-sm font-bold tracking-wider text-slate-900">
+                    {getDefaultStudentPassword(
+                      student.iniciales_clave_temporal ?? student.nombre,
+                      student.correo_acceso,
+                    )}
+                  </code>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Contraseña predeterminada activa. Se ocultará cuando el alumno la cambie.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void copyAccessValue(
+                      "password",
+                      getDefaultStudentPassword(
+                        student.iniciales_clave_temporal ?? student.nombre,
+                        student.correo_acceso!,
+                      ),
+                    )
+                  }
+                  aria-label="Copiar contraseña predeterminada"
+                  className="shrink-0 rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-sky-700"
+                >
+                  {copiedAccessField === "password" ? (
+                    <Check className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+                  ) : (
+                    <Copy className="h-4 w-4" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="mt-2 text-sm font-semibold tracking-widest text-slate-900">••••••••</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  El alumno estableció una contraseña personal y no puede ser consultada.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
+        {!student.usuario_id && (
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Este alumno todavía no tiene una cuenta de acceso vinculada.
+          </p>
+        )}
+
+        {showPasswordReset && student.usuario_id && (
+          <form onSubmit={handleAccessPasswordReset} className="mt-5 rounded-lg border border-slate-200 p-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="flex-1">
+                <label htmlFor="access-admin-password" className="text-sm font-medium text-slate-700">
+                  Contraseña del administrador
+                </label>
+                <input
+                  id="access-admin-password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={accessAdminPassword}
+                  onChange={(event) => setAccessAdminPassword(event.target.value)}
+                  className={fieldClass}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={isResettingAccess}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResettingAccess && <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                  {isResettingAccess ? "Generando..." : "Confirmar cambio"}
+                </button>
+                <button
+                  type="button"
+                  disabled={isResettingAccess}
+                  onClick={() => {
+                    setShowPasswordReset(false);
+                    setAccessAdminPassword("");
+                    setAccessError("");
+                  }}
+                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+
+            {accessError && (
+              <p role="alert" className="mt-3 text-sm text-red-600">{accessError}</p>
+            )}
+
+          </form>
+        )}
+      </section>
 
       <GuardianSection studentId={studentId} />
 
@@ -867,6 +1301,13 @@ export default function StudentDetailPage() {
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <input type="checkbox" checked={invoiced} onChange={(event) => setInvoiced(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" />
+              <span><strong className="block font-medium text-slate-900">Se factura este pago</strong><span className="mt-0.5 block text-xs text-slate-500">Actívalo cuando el movimiento deba incluirse como pago con factura.</span></span>
+            </label>
           </div>
 
           <div className="sm:col-span-2">
@@ -936,8 +1377,8 @@ export default function StudentDetailPage() {
             Mensualidades del ciclo
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Agosto a julio · deuda pendiente total:{" "}
-            {currencyFormatter.format(student.deuda_mensualidad)}
+            Agosto a julio · saldo vencido a la fecha:{" "}
+            {currencyFormatter.format(overdueMonthlyBalance)}
           </p>
         </div>
         {paymentsError && (
@@ -950,9 +1391,13 @@ export default function StudentDetailPage() {
             <article
               key={month.value}
               className={`rounded-xl border p-4 ${
-                month.isPaid
+                !month.isApplicable
+                  ? "border-slate-200 bg-white shadow-sm shadow-slate-200/40"
+                  : month.isPaid
                   ? "border-emerald-300 bg-white shadow-sm shadow-slate-200/40"
-                  : "border-slate-200 bg-white shadow-sm shadow-slate-200/40"
+                  : month.isDue
+                    ? "border-amber-300 bg-white shadow-sm shadow-slate-200/40"
+                    : "border-slate-200 bg-white shadow-sm shadow-slate-200/40"
               }`}
             >
               <div className="flex items-start justify-between gap-3">
@@ -962,7 +1407,7 @@ export default function StudentDetailPage() {
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
                     Costo:{" "}
-                    {currencyFormatter.format(effectiveMonthlyCost)}
+                    {currencyFormatter.format(month.effectiveCost)}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
                     Abonado: {currencyFormatter.format(month.paidAmount)}
@@ -970,12 +1415,22 @@ export default function StudentDetailPage() {
                 </div>
                 <span
                   className={`rounded-full px-2 py-1 text-xs font-medium ${
-                    month.isPaid
+                    !month.isApplicable
+                      ? "bg-slate-100 text-slate-500"
+                      : month.isPaid
                       ? "bg-emerald-100 text-emerald-700"
-                      : "bg-amber-100 text-amber-700"
+                      : month.isDue
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-slate-100 text-slate-600"
                   }`}
                 >
-                  {month.isPaid ? "Pagado" : "Pendiente"}
+                  {!month.isApplicable
+                    ? "No aplica"
+                    : month.isPaid
+                      ? "Pagado"
+                      : month.isDue
+                        ? "Pendiente"
+                        : "Próximo"}
                 </span>
               </div>
             </article>
