@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
   const password = typeof payload.password === "string" ? payload.password : "";
   const paymentMethod =
     typeof payload.paymentMethod === "string" ? payload.paymentMethod : "";
+  const invoiced = typeof payload.invoiced === "boolean" ? payload.invoiced : null;
   const amount = Number(payload.amount);
 
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(paymentId)) {
@@ -51,6 +52,9 @@ export async function POST(request: NextRequest) {
   ];
   if (!validPaymentMethods.includes(paymentMethod as MetodoPago)) {
     return errorResponse("Selecciona un método de pago válido.", 400);
+  }
+  if (invoiced === null) {
+    return errorResponse("Indica si el pago se factura o no.", 400);
   }
   if (reason.length < 5 || reason.length > 500) {
     return errorResponse("El motivo debe contener entre 5 y 500 caracteres.", 400);
@@ -103,6 +107,7 @@ export async function POST(request: NextRequest) {
       p_pago_id: paymentId,
       p_nuevo_monto: Math.round(amount * 100) / 100,
       p_metodo_pago: paymentMethod as MetodoPago,
+      p_facturado: invoiced,
       p_motivo: reason,
     },
   );

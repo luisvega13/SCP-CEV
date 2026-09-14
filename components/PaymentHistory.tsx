@@ -6,12 +6,14 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Download,
   LoaderCircle,
   Pencil,
   Trash2,
   X,
 } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { downloadPaymentReceipt } from "@/lib/payment-receipt-client";
 import {
   getPaymentMethodLabel,
   PAYMENT_METHOD_OPTIONS,
@@ -53,14 +55,16 @@ export function PaymentHistory({
   const [newAmount, setNewAmount] = useState("");
   const [editedPaymentMethod, setEditedPaymentMethod] =
     useState<MetodoPago>("efectivo");
+  const [editedInvoiced, setEditedInvoiced] = useState(false);
   const [reason, setReason] = useState("");
   const [password, setPassword] = useState("");
   const [editError, setEditError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<string | null>(null);
   const [isDeleteConfirmationOpen, setIsDeleteConfirmationOpen] = useState(false);
   const [toast, setToast] = useState("");
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const columnCount = editable ? 6 : 5;
+  const columnCount = 7;
 
   useEffect(() => {
     let mounted = true;
@@ -72,7 +76,7 @@ export function PaymentHistory({
       const to = from + PAGE_SIZE - 1;
       const { data, count, error: queryError } = await getSupabaseBrowserClient()
         .from("pagos")
-        .select("id, alumno_id, nivel_cobro, monto, tipo_pago, metodo_pago, fecha_pago, mes, anio, ciclo_escolar", { count: "exact" })
+        .select("id, folio_comprobante, alumno_id, nivel_cobro, monto, tipo_pago, metodo_pago, facturado, fecha_pago, mes, anio, ciclo_escolar", { count: "exact" })
         .eq("alumno_id", studentId)
         .order("fecha_pago", { ascending: false })
         .range(from, to);
@@ -108,9 +112,27 @@ export function PaymentHistory({
     setSelectedPayment(payment);
     setNewAmount(String(payment.monto));
     setEditedPaymentMethod(payment.metodo_pago);
+    setEditedInvoiced(payment.facturado);
     setReason("");
     setPassword("");
     setEditError("");
+  }
+
+  async function handleReceiptDownload(payment: Pago) {
+    setDownloadingReceiptId(payment.id);
+    setError("");
+    try {
+      await downloadPaymentReceipt(payment.id, payment.folio_comprobante);
+      setToast(`Comprobante ${payment.folio_comprobante} descargado.`);
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "No fue posible descargar el comprobante.",
+      );
+    } finally {
+      setDownloadingReceiptId(null);
+    }
   }
 
   function closeEditor() {
@@ -133,9 +155,10 @@ export function PaymentHistory({
     }
     if (
       Math.round(amount * 100) === Math.round(selectedPayment.monto * 100) &&
-      editedPaymentMethod === selectedPayment.metodo_pago
+      editedPaymentMethod === selectedPayment.metodo_pago &&
+      editedInvoiced === selectedPayment.facturado
     ) {
-      setEditError("Modifica el monto o el método de pago antes de guardar.");
+      setEditError("Modifica el monto, el método de pago o la condición de factura antes de guardar.");
       return;
     }
     if (reason.trim().length < 5) {
@@ -158,6 +181,7 @@ export function PaymentHistory({
           paymentId: selectedPayment.id,
           amount,
           paymentMethod: editedPaymentMethod,
+          invoiced: editedInvoiced,
           reason: reason.trim(),
           password,
         }),
@@ -248,14 +272,15 @@ export function PaymentHistory({
 
       <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="max-h-[400px] overflow-auto">
-          <table className="min-w-[760px] w-full divide-y divide-slate-200">
+          <table className="min-w-[840px] w-full divide-y divide-slate-200">
             <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(226_232_240)]">
               <tr>
                 {["Fecha de pago", "Tipo de pago", "Periodo", "Método / Folio"].map((heading) => (
                   <th key={heading} scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">{heading}</th>
                 ))}
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">Factura</th>
                 <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-600">Monto</th>
-                {editable && <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-600">Acción</th>}
+                <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-600">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -269,15 +294,21 @@ export function PaymentHistory({
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{dateFormatter.format(new Date(payment.fecha_pago))}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm font-medium capitalize text-slate-900">{payment.tipo_pago}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm capitalize text-slate-600">{payment.mes} {payment.anio}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{getPaymentMethodLabel(payment.metodo_pago)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600"><span className="block">{getPaymentMethodLabel(payment.metodo_pago)}</span><span className="mt-0.5 block font-mono text-xs text-slate-400">{payment.folio_comprobante}</span></td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm"><span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${payment.facturado ? "border-sky-200 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-500"}`}>{payment.facturado ? "Sí" : "No"}</span></td>
                   <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-slate-900">{currencyFormatter.format(payment.monto)}</td>
-                  {editable && (
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <div className="inline-flex items-center gap-2">
+                      <button type="button" onClick={() => void handleReceiptDownload(payment)} disabled={downloadingReceiptId === payment.id} aria-label={`Descargar comprobante ${payment.folio_comprobante}`} title="Descargar comprobante PDF" className="inline-grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-wait disabled:opacity-50">
+                        {downloadingReceiptId === payment.id ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
+                      </button>
+                      {editable && (
                       <button type="button" onClick={() => openEditor(payment)} aria-label={`Modificar pago de ${currencyFormatter.format(payment.monto)}`} title="Modificar pago" className="inline-grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500">
                         <Pencil className="h-4 w-4" aria-hidden="true" />
                       </button>
-                    </td>
-                  )}
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -320,6 +351,7 @@ export function PaymentHistory({
                   {PAYMENT_METHOD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </div>
+              <label className="flex items-start gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={editedInvoiced} onChange={(event) => setEditedInvoiced(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" /><span><strong className="block font-medium text-slate-900">Se factura este pago</strong><span className="mt-0.5 block text-xs text-slate-500">Puedes activar o retirar esta condición. El cambio quedará auditado.</span></span></label>
               <div>
                 <label htmlFor="payment-edit-reason" className="text-sm font-medium text-slate-700">Motivo de la corrección o eliminación</label>
                 <textarea id="payment-edit-reason" required minLength={5} maxLength={500} rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ej. Corrección por error de captura" className="mt-2 w-full resize-none rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100" />

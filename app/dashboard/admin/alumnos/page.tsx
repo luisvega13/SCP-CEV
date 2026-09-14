@@ -12,7 +12,9 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDollarSign,
+  Download,
   Eye,
+  LoaderCircle,
   PauseCircle,
   Pencil,
   Search,
@@ -27,6 +29,8 @@ import { TableSkeletonRows } from "@/components/TableSkeletonRows";
 import {
   ACADEMIC_LEVEL_LABELS,
   getAcademicGradeLabel,
+  getCurrentAcademicCycle,
+  getCycleStartYear,
   getFullStudentName,
   getMaximumGrade,
 } from "@/lib/academic";
@@ -131,6 +135,9 @@ export default function StudentsPage() {
     useState<StudentListItem | null>(null);
   const [drawer, setDrawer] = useState<DrawerState>(null);
   const [toast, setToast] = useState("");
+  const [isDownloadingBreakdown, setIsDownloadingBreakdown] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [exportCycle, setExportCycle] = useState(getCurrentAcademicCycle);
 
   const refetchStudents = useCallback(async (showLoading = false) => {
     if (showLoading) setIsLoading(true);
@@ -218,6 +225,44 @@ export default function StudentsPage() {
     resetPage();
   }
 
+  async function downloadStudentBreakdown() {
+    setIsDownloadingBreakdown(true);
+    setExportError("");
+    try {
+      const response = await fetch(`/api/admin/exports/student-breakdown?cycle=${encodeURIComponent(exportCycle)}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "No fue posible generar el reporte de alumnos.");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `desglose-alumnos-${exportCycle}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (caughtError) {
+      setExportError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "No fue posible descargar el reporte de alumnos.",
+      );
+    } finally {
+      setIsDownloadingBreakdown(false);
+    }
+  }
+
+  function moveExportCycle(offset: -1 | 1) {
+    const startYear = getCycleStartYear(exportCycle) + offset;
+    setExportCycle(`${startYear}-${startYear + 1}`);
+    setExportError("");
+  }
+
   return (
     <section className="mx-auto max-w-7xl">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -226,17 +271,37 @@ export default function StudentsPage() {
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Alumnos</h1>
           <p className="mt-2 text-sm text-slate-500">Consulta, organiza y administra el directorio institucional.</p>
         </div>
-        <button type="button" onClick={() => setDrawer({ mode: "new", student: null })} className="inline-flex items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2">
-          <UserPlus className="h-4 w-4" aria-hidden="true" />
-          Nuevo alumno
-        </button>
+        <div className="flex flex-col gap-2 sm:items-end lg:flex-row">
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">Ciclo del reporte</p>
+            <div className="inline-flex w-full items-stretch rounded-lg border border-slate-300 bg-white sm:w-auto" role="group" aria-label="Seleccionar ciclo del reporte de alumnos">
+              <button type="button" onClick={() => moveExportCycle(-1)} disabled={isDownloadingBreakdown} aria-label="Ciclo escolar anterior" className="grid w-10 place-items-center rounded-l-lg text-slate-500 transition hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
+              <span className="min-w-32 border-x border-slate-200 px-4 py-2.5 text-center text-sm font-semibold tabular-nums text-slate-800">{exportCycle}</span>
+              <button type="button" onClick={() => moveExportCycle(1)} disabled={isDownloadingBreakdown} aria-label="Ciclo escolar siguiente" className="grid w-10 place-items-center rounded-r-lg text-slate-500 transition hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+            </div>
+          </div>
+          <button type="button" onClick={() => void downloadStudentBreakdown()} disabled={isDownloadingBreakdown} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50">
+            {isDownloadingBreakdown ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
+            Descargar alumnos por nivel
+          </button>
+          <button type="button" onClick={() => setDrawer({ mode: "new", student: null })} className="inline-flex items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2">
+            <UserPlus className="h-4 w-4" aria-hidden="true" />
+            Nuevo alumno
+          </button>
+        </div>
       </header>
+
+      {exportError && (
+        <p role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {exportError}
+        </p>
+      )}
 
       <div className="mt-7 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <label htmlFor="student-search" className="sr-only">Buscar alumnos</label>
         <div className="relative">
           <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-          <input id="student-search" type="search" value={search} onChange={(event) => { setSearch(event.target.value); resetPage(); }} placeholder="Buscar por nombre, apellido o matrícula..." className="w-full rounded-xl border border-slate-300 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-100" />
+          <input id="student-search" type="search" value={search} onChange={(event) => { setSearch(event.target.value); resetPage(); }} placeholder="Buscar por nombre, apellido o CURP..." className="w-full rounded-xl border border-slate-300 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-100" />
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -277,7 +342,7 @@ export default function StudentsPage() {
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
-                <SortableHeading label="Matrícula" sortKey="matricula" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                <SortableHeading label="CURP" sortKey="matricula" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
                 <SortableHeading label="Nombre completo" sortKey="nombre" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
                 <SortableHeading label="Nivel / Grado / Grupo" sortKey="trayectoria" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
                 <SortableHeading label="Estado académico" sortKey="estado" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
@@ -292,7 +357,7 @@ export default function StudentsPage() {
               {!isLoading && !error && visibleStudents.map((student) => {
                 const status = statusPresentation[student.estado];
                 const StatusIcon = status.icon;
-                const hasDebt = student.deuda_mensualidad > 0 || student.deuda_inscripcion > 0;
+                const hasDebt = student.saldo_vencido >= 0.01;
                 const fullName = getFullStudentName(student);
                 return (
                   <tr key={student.id} className="transition-colors hover:bg-slate-50/80">
@@ -303,9 +368,9 @@ export default function StudentsPage() {
                       <span title={status.label} aria-label={status.label} className={`inline-flex ${status.className}`}><StatusIcon className="h-5 w-5" aria-hidden="true" /><span className="sr-only">{status.label}</span></span>
                     </td>
                     <td className="px-5 py-4 text-center">
-                      <span title={hasDebt ? "Tiene saldo pendiente" : "Al corriente"} aria-label={hasDebt ? "Tiene saldo pendiente" : "Al corriente"} className={hasDebt ? "text-amber-600/80" : "text-slate-400"}>
+                      <span title={hasDebt ? "Tiene saldo vencido" : "Al corriente a la fecha"} aria-label={hasDebt ? "Tiene saldo vencido" : "Al corriente a la fecha"} className={hasDebt ? "text-amber-600/80" : "text-slate-400"}>
                         {hasDebt ? <CircleAlert className="inline h-5 w-5" aria-hidden="true" /> : <BadgeCheck className="inline h-5 w-5" aria-hidden="true" />}
-                        <span className="sr-only">{hasDebt ? "Tiene saldo pendiente" : "Al corriente"}</span>
+                        <span className="sr-only">{hasDebt ? "Tiene saldo vencido" : "Al corriente a la fecha"}</span>
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-5 py-4 text-right">

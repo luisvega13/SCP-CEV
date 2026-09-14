@@ -13,6 +13,7 @@ import {
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import {
   getDiscountedCost,
+  getScholarshipDiscountLabel,
   getScholarshipScopeLabel,
   type AppliedScholarship,
 } from "@/lib/scholarships";
@@ -38,8 +39,16 @@ export default function StudentDashboardPage() {
   const [configuration, setConfiguration] =
     useState<ConfiguracionCostos | null>(null);
   const [scholarship, setScholarship] = useState<AppliedScholarship | null>(null);
+  const [accountCharges, setAccountCharges] = useState<EstadoCuenta[]>([]);
   const [overdueBalance, setOverdueBalance] = useState(0);
+  const [overdueEnrollmentBalance, setOverdueEnrollmentBalance] = useState(0);
   const [currentDate] = useState(() => new Date());
+  const [today] = useState(() => new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date()));
   const [cycle] = useState(getCurrentAcademicCycle);
 
   useEffect(() => {
@@ -94,7 +103,7 @@ export default function StudentDashboardPage() {
               .eq("alumno_id", data.id),
             supabase
               .from("alumnos_becas")
-              .select("porcentaje_aplicado, alcance_aplicado, becas!inner(nombre)")
+              .select("tipo_descuento_aplicado, porcentaje_aplicado, monto_fijo_aplicado, alcance_aplicado, vigencia_desde, becas!inner(nombre)")
               .eq("alumno_id", data.id)
               .eq("ciclo_escolar", cycle)
               .maybeSingle(),
@@ -109,11 +118,12 @@ export default function StudentDashboardPage() {
             setConfiguration(configurationResult.data);
             setScholarship(scholarshipResult.data as unknown as AppliedScholarship | null);
             const charges = accountResult.data as EstadoCuenta[];
+            setAccountCharges(charges);
             const overdueMonthlyBalance = charges
               .filter(
                 (charge) =>
                   charge.tipo_pago === "mensualidad" &&
-                  charge.estatus === "vencido",
+                  charge.fecha_limite < today,
               )
               .reduce(
                 (total, charge) =>
@@ -121,7 +131,9 @@ export default function StudentDashboardPage() {
                 0,
               );
             const enrollmentCharges = charges.filter(
-              (charge) => charge.tipo_pago === "inscripcion",
+              (charge) =>
+                charge.tipo_pago === "inscripcion" &&
+                charge.fecha_limite < today,
             );
             const pendingEnrollmentBalance = enrollmentCharges.length > 0
               ? enrollmentCharges.reduce(
@@ -129,7 +141,11 @@ export default function StudentDashboardPage() {
                     total + Math.max(charge.monto_esperado - charge.monto_pagado, 0),
                   0,
                 )
-              : data.deuda_inscripcion;
+              : configurationResult.data &&
+                  configurationResult.data.fecha_limite_inscripcion < today
+                ? data.deuda_inscripcion
+                : 0;
+            setOverdueEnrollmentBalance(pendingEnrollmentBalance);
             setOverdueBalance(
               overdueMonthlyBalance + pendingEnrollmentBalance,
             );
@@ -164,7 +180,7 @@ export default function StudentDashboardPage() {
     return () => {
       isMounted = false;
     };
-  }, [cycle]);
+  }, [cycle, today]);
 
   if (isLoading) {
     return (
@@ -191,11 +207,23 @@ export default function StudentDashboardPage() {
   }
 
   const currentMonthIndex = getCurrentAcademicMonthIndex(currentDate);
-  const effectiveMonthlyCost = configuration
-    ? getDiscountedCost(configuration.costo_mensualidad, scholarship, "mensualidad")
-    : 0;
   const monthlyStatuses = ACADEMIC_MONTHS.map((month, index) => {
     const year = getAcademicMonthYear(month.value, cycle);
+    const charge = accountCharges.find(
+      (item) =>
+        item.tipo_pago === "mensualidad" &&
+        item.mes === month.value &&
+        item.anio === year,
+    );
+    const calculatedCost = configuration
+      ? getDiscountedCost(
+          configuration.costo_mensualidad,
+          scholarship,
+          "mensualidad",
+          { month: month.value, year },
+        )
+      : 0;
+    const effectiveCost = charge?.monto_esperado ?? calculatedCost;
     const paidAmount = payments
       .filter(
         (payment) =>
@@ -209,18 +237,21 @@ export default function StudentDashboardPage() {
       ...month,
       index,
       year,
+      effectiveCost,
       paidAmount,
       pendingAmount: configuration
-        ? Math.max(effectiveMonthlyCost - paidAmount, 0)
+        ? Math.max(effectiveCost - (charge?.monto_pagado ?? paidAmount), 0)
         : 0,
       isCurrent: index === currentMonthIndex,
-      isDue: index <= currentMonthIndex,
+      isApplicable: Boolean(charge),
+      isDue: Boolean(charge && charge.fecha_limite < today),
       isPaid:
-        configuration !== null &&
-        paidAmount >= effectiveMonthlyCost,
+        Boolean(charge) &&
+        (charge?.monto_pagado ?? paidAmount) >= effectiveCost,
     };
   });
   const currentMonth = monthlyStatuses[currentMonthIndex];
+  const effectiveMonthlyCost = currentMonth?.effectiveCost ?? 0;
   const accruedMonthlyDebt = configuration
     ? monthlyStatuses
         .filter((month) => month.isDue)
@@ -277,7 +308,7 @@ export default function StudentDashboardPage() {
           </div>
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Matrícula
+              CURP
             </dt>
             <dd className="mt-2 font-mono text-sm font-semibold text-slate-900">
               {student.matricula ?? "Sin asignar"}
@@ -365,8 +396,8 @@ export default function StudentDashboardPage() {
               }`}
             >
               {!hasOverdueBalance
-                ? `Tus mensualidades están cubiertas hasta ${currentMonth.label} ${currentMonth.year}.`
-                : `Saldo vencido más inscripción pendiente: ${currencyFormatter.format(overdueBalance)}.`}
+                ? "No tienes cargos vencidos a la fecha."
+                : `Tu saldo vencido a la fecha es ${currencyFormatter.format(overdueBalance)}.`}
             </p>
           </div>
         )}
@@ -380,10 +411,10 @@ export default function StudentDashboardPage() {
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
             <p className="text-sm font-medium text-violet-800">
-              Deuda de inscripción
+              Saldo vencido de inscripción
             </p>
             <p className="mt-2 text-3xl font-bold tabular-nums text-violet-950">
-              {currencyFormatter.format(student.deuda_inscripcion)}
+              {currencyFormatter.format(overdueEnrollmentBalance)}
             </p>
           </article>
           <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
@@ -411,8 +442,8 @@ export default function StudentDashboardPage() {
         {scholarship && (
           <div className="mt-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
             <p className="text-sm font-medium text-emerald-800">Beca aplicada</p>
-            <p className="mt-1 text-lg font-bold text-emerald-950">{scholarship.becas.nombre} · {Number(scholarship.porcentaje_aplicado).toFixed(2)}%</p>
-            <p className="mt-1 text-xs text-emerald-700">Aplica a {getScholarshipScopeLabel(scholarship.alcance_aplicado).toLocaleLowerCase("es-MX")} durante el ciclo {cycle}.</p>
+            <p className="mt-1 text-lg font-bold text-emerald-950">{scholarship.becas.nombre} · {getScholarshipDiscountLabel(scholarship)}</p>
+            <p className="mt-1 text-xs text-emerald-700">Aplica a {getScholarshipScopeLabel(scholarship.alcance_aplicado).toLocaleLowerCase("es-MX")} desde el {new Intl.DateTimeFormat("es-MX", { dateStyle: "long", timeZone: "America/Mexico_City" }).format(new Date(`${scholarship.vigencia_desde}T12:00:00-06:00`))}. No modifica meses anteriores.</p>
           </div>
         )}
       </div>
@@ -463,14 +494,18 @@ export default function StudentDashboardPage() {
                 </div>
                 <span
                   className={`rounded-full px-2 py-1 text-xs font-medium ${
-                    month.isPaid
+                    !month.isApplicable
+                      ? "bg-slate-100 text-slate-500"
+                      : month.isPaid
                       ? "bg-emerald-100 text-emerald-700"
                       : month.isDue
                         ? "bg-amber-100 text-amber-700"
                         : "bg-slate-100 text-slate-600"
                   }`}
                 >
-                  {month.isPaid
+                  {!month.isApplicable
+                    ? "No aplica"
+                    : month.isPaid
                     ? "Pagado"
                     : month.isDue
                       ? "Pendiente"

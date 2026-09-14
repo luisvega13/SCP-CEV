@@ -16,12 +16,17 @@ interface SidebarProps {
 const linksByRole: Record<UserRole, Array<{ label: string; href: string }>> = {
   admin: [
     { label: "Alumnos", href: "/dashboard/admin/alumnos" },
+    { label: "Bajas", href: "/dashboard/admin/bajas" },
     { label: "Pagos", href: "/dashboard/admin/pagos" },
     { label: "Becas", href: "/dashboard/admin/becas" },
     { label: "Reportes", href: "/dashboard/admin/reportes" },
+    { label: "Auditoría", href: "/dashboard/admin/auditoria" },
     { label: "Configuración", href: "/dashboard/admin/configuracion" },
   ],
-  student: [{ label: "Mi cuenta", href: "/dashboard/alumno" }],
+  student: [
+    { label: "Mi cuenta", href: "/dashboard/alumno" },
+    { label: "Contraseña", href: "/dashboard/alumno/contrasena" },
+  ],
 };
 
 export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
@@ -34,6 +39,7 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
     role === "admin" ? "/dashboard/admin" : "/dashboard/alumno";
 
   function isActiveLink(href: string) {
+    if (href === dashboardHome) return pathname === href;
     return pathname === href || pathname.startsWith(`${href}/`);
   }
 

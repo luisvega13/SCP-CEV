@@ -1,38 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
-  BadgePercent,
-  Banknote,
-  CalendarClock,
-  CheckCircle2,
-  CircleDollarSign,
-  Clock3,
-  CreditCard,
-  FilePenLine,
-  GraduationCap,
-  Landmark,
+  Download,
   LoaderCircle,
-  PauseCircle,
-  ReceiptText,
   RefreshCw,
-  School,
-  ShieldCheck,
-  Trash2,
-  TrendingDown,
-  TrendingUp,
-  UserMinus,
-  Users,
-  WalletCards,
 } from "lucide-react";
 import { getPaymentMethodLabel } from "@/lib/payments";
-import { loadDashboardMetrics } from "@/lib/admin-data";
+import { getAcademicGradeLabel } from "@/lib/academic";
+import {
+  getScholarshipDiscountLabel,
+  getScholarshipScopeLabel,
+} from "@/lib/scholarships";
+import {
+  invalidateAdminData,
+  loadDailyClosing,
+  loadDashboardMetrics,
+  loadMonthlyFinancialSummary,
+  loadScholarshipBreakdown,
+  loadStudentBreakdown,
+} from "@/lib/admin-data";
 import type {
   AdminDashboardOverview,
-  EstatusCobro,
+  BecadosPorTipo,
+  CorteDiario,
+  DesgloseAlumnos,
   NivelEscolar,
+  ResumenFinancieroMensual,
 } from "@/types/database";
 
 const currencyFormatter = new Intl.NumberFormat("es-MX", {
@@ -43,15 +38,28 @@ const currencyFormatter = new Intl.NumberFormat("es-MX", {
 
 const numberFormatter = new Intl.NumberFormat("es-MX");
 
+const axisCurrencyFormatter = new Intl.NumberFormat("es-MX", {
+  style: "currency",
+  currency: "MXN",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 const dateTimeFormatter = new Intl.DateTimeFormat("es-MX", {
   dateStyle: "medium",
   timeStyle: "short",
   timeZone: "America/Mexico_City",
 });
 
-const shortDateFormatter = new Intl.DateTimeFormat("es-MX", {
+const fullDateFormatter = new Intl.DateTimeFormat("es-MX", {
+  dateStyle: "long",
+  timeZone: "America/Mexico_City",
+});
+
+const tableDateFormatter = new Intl.DateTimeFormat("es-MX", {
   day: "2-digit",
-  month: "short",
+  month: "2-digit",
+  year: "numeric",
   timeZone: "America/Mexico_City",
 });
 
@@ -60,16 +68,6 @@ const LEVEL_LABELS: Record<NivelEscolar, string> = {
   primaria: "Primaria",
   secundaria: "Secundaria",
   bachillerato: "Bachillerato",
-};
-
-const STATUS_META: Record<
-  EstatusCobro,
-  { label: string; className: string }
-> = {
-  pagado: { label: "Pagados", className: "bg-emerald-500" },
-  parcial: { label: "Parciales", className: "bg-amber-400" },
-  vencido: { label: "Vencidos", className: "bg-red-500" },
-  pendiente: { label: "Pendientes", className: "bg-slate-300" },
 };
 
 function getErrorMessage(error: unknown) {
@@ -85,113 +83,536 @@ function getErrorMessage(error: unknown) {
   return "No fue posible cargar el resumen administrativo.";
 }
 
-function MetricCard({
-  label,
-  value,
-  description,
-  icon: Icon,
-  tone,
-  isLoading,
+function DownloadReportLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      download
+      className="inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-sky-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700"
+    >
+      <Download className="h-4 w-4" aria-hidden="true" />
+      Descargar reporte
+    </a>
+  );
+}
+
+type FinancialChartMetric = "proyectado" | "pagado" | "adeudo";
+
+const FINANCIAL_CHART_META: Record<
+  FinancialChartMetric,
+  { label: string; totalLabel: string; barClassName: string }
+> = {
+  proyectado: {
+    label: "Proyección de ingresos",
+    totalLabel: "Proyección total del ciclo",
+    barClassName: "bg-sky-500 group-hover:bg-sky-600",
+  },
+  pagado: {
+    label: "Pago aplicado",
+    totalLabel: "Pagado aplicado al ciclo",
+    barClassName: "bg-emerald-500 group-hover:bg-emerald-600",
+  },
+  adeudo: {
+    label: "Adeudo pendiente",
+    totalLabel: "Adeudo pendiente del ciclo",
+    barClassName: "bg-amber-500 group-hover:bg-amber-600",
+  },
+};
+
+function FinancialCycleChart({
+  summary,
 }: {
-  label: string;
-  value: string;
-  description: string;
-  icon: LucideIcon;
-  tone: "sky" | "emerald" | "amber" | "red" | "violet" | "slate";
-  isLoading: boolean;
+  summary: ResumenFinancieroMensual;
 }) {
-  const tones = {
-    sky: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-sky-50 [&_.metric-icon]:text-sky-700",
-    emerald: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-emerald-50 [&_.metric-icon]:text-emerald-700",
-    amber: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-amber-50 [&_.metric-icon]:text-amber-700",
-    red: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-red-50 [&_.metric-icon]:text-red-700",
-    violet: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-violet-50 [&_.metric-icon]:text-violet-700",
-    slate: "border-slate-200 bg-white text-slate-950 [&_.metric-icon]:bg-slate-100 [&_.metric-icon]:text-slate-600",
-  };
+  const [metric, setMetric] = useState<FinancialChartMetric>("proyectado");
+  const meta = FINANCIAL_CHART_META[metric];
+  const values = summary.meses.map((month) => Number(month[metric]) || 0);
+  const maximum = Math.max(1, ...values);
+  const axisMaximum = Math.ceil(maximum / 4) * 4;
+  const ticks = [axisMaximum, axisMaximum * 0.75, axisMaximum * 0.5, axisMaximum * 0.25, 0];
+  const total = values.reduce((sum, value) => sum + value, 0);
 
   return (
-    <article className={`min-w-0 overflow-hidden rounded-2xl border p-5 shadow-sm ${tones[tone]}`}>
-      <div className="flex items-start justify-between gap-3">
-        <p className="min-w-0 text-sm font-semibold opacity-75">{label}</p>
-        <span className="metric-icon grid h-9 w-9 shrink-0 place-items-center rounded-lg">
-          <Icon className="h-4.5 w-4.5" aria-hidden="true" />
-        </span>
+    <section className="mt-6 min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-slate-950">
+            Resumen financiero del ciclo
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Comparativo mensual de agosto a julio del ciclo {summary.ciclo_escolar}.
+          </p>
+        </div>
+        <div className="flex max-w-full flex-col gap-3 lg:items-end">
+          <DownloadReportLink
+            href={`/api/admin/exports/monthly-finance?cycle=${encodeURIComponent(summary.ciclo_escolar)}`}
+          />
+          <div
+            className="flex max-w-full gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1"
+            aria-label="Cambiar gráfica financiera"
+          >
+            {(Object.keys(FINANCIAL_CHART_META) as FinancialChartMetric[]).map(
+              (option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={metric === option}
+                  onClick={() => setMetric(option)}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition sm:text-sm ${
+                    metric === option
+                      ? "bg-white text-sky-700 shadow-sm ring-1 ring-slate-200"
+                      : "text-slate-600 hover:text-slate-950"
+                  }`}
+                >
+                  {FINANCIAL_CHART_META[option].label}
+                </button>
+              ),
+            )}
+          </div>
+        </div>
       </div>
-      {isLoading ? (
-        <div className="mt-3 h-9 w-32 animate-pulse rounded bg-current opacity-10" />
-      ) : (
-        <p
-          title={value}
-          className="mt-3 max-w-full whitespace-nowrap text-[clamp(1.25rem,calc(1rem+0.45vw),1.875rem)] font-bold leading-tight tracking-tight tabular-nums"
-        >
-          {value}
+
+      <div className="mt-5 flex flex-col gap-1 border-b border-slate-100 pb-4 sm:flex-row sm:items-baseline sm:justify-between">
+        <p className="text-sm font-medium text-slate-500">{meta.totalLabel}</p>
+        <p className="text-2xl font-bold tabular-nums text-slate-950">
+          {currencyFormatter.format(total)}
         </p>
-      )}
-      <p className="mt-2 text-xs leading-5 opacity-65">{description}</p>
-    </article>
-  );
-}
-
-function MiniStat({
-  label,
-  value,
-  detail,
-  icon: Icon,
-}: {
-  label: string;
-  value: string;
-  detail?: string;
-  icon: LucideIcon;
-}) {
-  return (
-    <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/40">
-      <div className="flex items-center gap-2 text-slate-500">
-        <Icon className="h-4 w-4" aria-hidden="true" />
-        <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
       </div>
-      <p
-        title={value}
-        className="mt-2 max-w-full whitespace-nowrap text-[clamp(1.0625rem,calc(0.9rem+0.25vw),1.25rem)] font-bold leading-tight tracking-tight tabular-nums text-slate-950"
-      >
-        {value}
+
+      <div className="mt-6 max-w-full overflow-x-auto pb-2">
+        <div className="min-w-[760px]">
+          <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
+            <div className="flex h-64 flex-col justify-between pb-px text-right text-[11px] font-medium tabular-nums text-slate-400">
+              {ticks.map((tick) => (
+                <span key={tick}>{axisCurrencyFormatter.format(tick)}</span>
+              ))}
+            </div>
+            <div className="relative h-64 border-b border-l border-slate-200">
+              {[0, 25, 50, 75].map((position) => (
+                <span
+                  key={position}
+                  aria-hidden="true"
+                  className="absolute left-0 right-0 border-t border-dashed border-slate-200"
+                  style={{ top: `${position}%` }}
+                />
+              ))}
+              <div className="absolute inset-0 flex items-end gap-3 px-3">
+                {summary.meses.map((month, index) => {
+                  const value = values[index];
+                  const height = value === 0 ? 1 : Math.max(3, (value / axisMaximum) * 100);
+                  return (
+                    <div
+                      key={`${month.mes}-${month.anio}`}
+                      className="group flex h-full min-w-0 flex-1 items-end justify-center"
+                    >
+                      <div
+                        title={`${month.etiqueta} ${month.anio}: ${currencyFormatter.format(value)}`}
+                        style={{ height: `${height}%` }}
+                        className={`w-full max-w-12 rounded-t-md transition-colors ${meta.barClassName}`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <span aria-hidden="true" />
+            <div className="grid grid-cols-12 gap-3 px-3 text-center">
+              {summary.meses.map((month) => (
+                <div key={`${month.mes}-${month.anio}`} className="min-w-0">
+                  <p className="truncate text-xs font-semibold capitalize text-slate-600">
+                    {month.etiqueta.slice(0, 3)}
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    {String(month.anio).slice(-2)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p className="sr-only">
+        {meta.label}: {summary.meses
+          .map(
+            (month, index) =>
+              `${month.etiqueta} ${month.anio}, ${currencyFormatter.format(values[index])}`,
+          )
+          .join("; ")}.
       </p>
-      {detail && <p className="mt-1 text-xs text-slate-500">{detail}</p>}
-    </div>
+    </section>
   );
 }
 
-function SectionCard({
-  title,
-  description,
-  children,
-  className = "",
-}: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
+function DailyClosingCard({ closing }: { closing: CorteDiario }) {
+  const generalRows = [
+    {
+      label: "Movimientos",
+      withoutInvoice: numberFormatter.format(closing.movimientos_sin_factura),
+      withInvoice: numberFormatter.format(closing.movimientos_con_factura),
+      total: numberFormatter.format(closing.total_movimientos),
+    },
+    {
+      label: "Recaudado (MXN)",
+      withoutInvoice: currencyFormatter.format(closing.recaudado_sin_factura),
+      withInvoice: currencyFormatter.format(closing.recaudado_con_factura),
+      total: currencyFormatter.format(closing.total_recaudado),
+    },
+  ];
+
   return (
-    <section className={`min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 ${className}`}>
-      <div className="min-w-0">
-        <h2 className="text-lg font-bold text-slate-950">{title}</h2>
-        <p className="mt-1 text-sm text-slate-500">{description}</p>
+    <section className="mt-6 min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-slate-950">Corte diario</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Movimientos y recaudación del día, separados por estatus de factura.
+          </p>
+        </div>
+        <div className="flex flex-col gap-3 sm:items-end">
+          <DownloadReportLink
+            href={`/api/admin/daily-closing?date=${encodeURIComponent(closing.fecha)}`}
+          />
+          <p className="text-sm font-semibold capitalize text-slate-700">
+            {fullDateFormatter.format(new Date(`${closing.fecha}T12:00:00Z`))}
+          </p>
+        </div>
       </div>
-      <div className="mt-6 min-w-0 max-w-full">{children}</div>
+
+      <div className="mt-6">
+        <h3 className="text-sm font-bold text-slate-900">Resumen general</h3>
+        <div className="mt-3 max-w-full overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full min-w-[620px] border-collapse text-sm">
+            <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Concepto</th>
+                <th className="px-4 py-3 text-right">Sin factura</th>
+                <th className="px-4 py-3 text-right">Con factura</th>
+                <th className="px-4 py-3 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {generalRows.map((row) => (
+                <tr key={row.label}>
+                  <th scope="row" className="px-4 py-3 text-left font-semibold text-slate-800">
+                    {row.label}
+                  </th>
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-600">{row.withoutInvoice}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-600">{row.withInvoice}</td>
+                  <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-950">{row.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="mt-7">
+        <h3 className="text-sm font-bold text-slate-900">Resumen por método</h3>
+        <div className="mt-3 max-w-full overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full min-w-[1040px] border-collapse text-sm">
+            <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Método de pago</th>
+                <th className="px-4 py-3 text-right">Mov. sin factura</th>
+                <th className="px-4 py-3 text-right">Mov. con factura</th>
+                <th className="px-4 py-3 text-right">Mov. totales</th>
+                <th className="px-4 py-3 text-right">Recaudado sin factura</th>
+                <th className="px-4 py-3 text-right">Recaudado con factura</th>
+                <th className="px-4 py-3 text-right">Recaudado total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {closing.por_metodo.map((method) => (
+                <tr key={method.metodo}>
+                  <th scope="row" className="whitespace-nowrap px-4 py-3 text-left font-semibold text-slate-800">
+                    {getPaymentMethodLabel(method.metodo)}
+                  </th>
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-600">{numberFormatter.format(method.movimientos_sin_factura)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-600">{numberFormatter.format(method.movimientos_con_factura)}</td>
+                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-800">{numberFormatter.format(method.movimientos)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">{currencyFormatter.format(method.recaudado_sin_factura)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">{currencyFormatter.format(method.recaudado_con_factura)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right font-bold tabular-nums text-slate-950">{currencyFormatter.format(method.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const ACADEMIC_LEVELS: NivelEscolar[] = [
+  "preescolar",
+  "primaria",
+  "secundaria",
+  "bachillerato",
+];
+
+function StudentBreakdownCard({ report }: { report: DesgloseAlumnos }) {
+  const [selectedLevel, setSelectedLevel] =
+    useState<NivelEscolar>("preescolar");
+  const level = report.niveles.find((item) => item.nivel === selectedLevel);
+
+  return (
+    <section className="mt-6 min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-slate-950">
+            Desglose de alumnos
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Distribución del padrón por grado, sexo y estado académico en el ciclo {report.ciclo_escolar}.
+          </p>
+        </div>
+        <div className="flex max-w-full flex-col gap-3 lg:items-end">
+          <DownloadReportLink
+            href={`/api/admin/exports/student-breakdown?cycle=${encodeURIComponent(report.ciclo_escolar)}`}
+          />
+          <div
+            className="flex max-w-full gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1"
+            aria-label="Cambiar nivel del desglose"
+          >
+            {ACADEMIC_LEVELS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={selectedLevel === option}
+                onClick={() => setSelectedLevel(option)}
+                className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition sm:text-sm ${
+                  selectedLevel === option
+                    ? "bg-white text-sky-700 shadow-sm ring-1 ring-slate-200"
+                    : "text-slate-600 hover:text-slate-950"
+                }`}
+              >
+                {LEVEL_LABELS[option]}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 max-w-full overflow-x-auto rounded-xl border border-slate-200">
+        <table className="w-full min-w-[820px] border-collapse text-sm">
+          <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-3">Nivel</th>
+              <th className="px-4 py-3">Grado / semestre</th>
+              <th className="px-4 py-3 text-right">Total</th>
+              <th className="px-4 py-3 text-right">Hombres</th>
+              <th className="px-4 py-3 text-right">Mujeres</th>
+              <th className="px-4 py-3 text-right">Activos</th>
+              <th className="px-4 py-3 text-right">En pausa</th>
+              <th className="px-4 py-3 text-right">Bajas</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {level?.grados.map((grade) => (
+              <tr key={grade.grado}>
+                <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">
+                  {LEVEL_LABELS[selectedLevel]}
+                </td>
+                <th scope="row" className="whitespace-nowrap px-4 py-3 text-left font-semibold text-slate-800">
+                  {getAcademicGradeLabel(selectedLevel, grade.grado)}
+                </th>
+                <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-950">{numberFormatter.format(grade.total)}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-600">{numberFormatter.format(grade.hombres)}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-600">{numberFormatter.format(grade.mujeres)}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-600">{numberFormatter.format(grade.activos)}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-600">{numberFormatter.format(grade.pausas)}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-600">{numberFormatter.format(grade.bajas)}</td>
+              </tr>
+            ))}
+            {level && (
+              <tr className="bg-slate-50/70">
+                <th scope="row" className="whitespace-nowrap px-4 py-3 text-left font-bold text-slate-950">
+                  {LEVEL_LABELS[level.nivel]}
+                </th>
+                <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950">Total del nivel</td>
+                <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-950">{numberFormatter.format(level.total)}</td>
+                <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-950">{numberFormatter.format(level.hombres)}</td>
+                <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-950">{numberFormatter.format(level.mujeres)}</td>
+                <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-950">{numberFormatter.format(level.activos)}</td>
+                <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-950">{numberFormatter.format(level.pausas)}</td>
+                <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-950">{numberFormatter.format(level.bajas)}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+const SCHOLARSHIP_ROWS_PER_PAGE = 5;
+
+function ScholarshipBreakdownCard({ report }: { report: BecadosPorTipo }) {
+  const [selectedScholarshipId, setSelectedScholarshipId] = useState(
+    report.tipos[0]?.beca_id ?? "",
+  );
+  const [page, setPage] = useState(1);
+  const scholarship =
+    report.tipos.find((item) => item.beca_id === selectedScholarshipId) ??
+    report.tipos[0];
+  const totalPages = Math.max(
+    1,
+    Math.ceil((scholarship?.alumnos.length ?? 0) / SCHOLARSHIP_ROWS_PER_PAGE),
+  );
+  const currentPage = Math.min(page, totalPages);
+  const visibleStudents =
+    scholarship?.alumnos.slice(
+      (currentPage - 1) * SCHOLARSHIP_ROWS_PER_PAGE,
+      currentPage * SCHOLARSHIP_ROWS_PER_PAGE,
+    ) ?? [];
+
+  return (
+    <section className="mt-6 min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-slate-950">Alumnos becados</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Alumnos agrupados por tipo de beca en el ciclo {report.ciclo_escolar} · {numberFormatter.format(report.total_becados)} becados en total.
+          </p>
+        </div>
+        <div className="flex max-w-full flex-col gap-3 lg:items-end">
+          <DownloadReportLink
+            href={`/api/admin/exports/scholarship-students?cycle=${encodeURIComponent(report.ciclo_escolar)}`}
+          />
+          {report.tipos.length > 0 && (
+          <div
+            className="flex max-w-full gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1"
+            aria-label="Cambiar tipo de beca"
+          >
+            {report.tipos.map((type) => (
+              <button
+                key={type.beca_id}
+                type="button"
+                aria-pressed={scholarship?.beca_id === type.beca_id}
+                onClick={() => {
+                  setSelectedScholarshipId(type.beca_id);
+                  setPage(1);
+                }}
+                className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition sm:text-sm ${
+                  scholarship?.beca_id === type.beca_id
+                    ? "bg-white text-sky-700 shadow-sm ring-1 ring-slate-200"
+                    : "text-slate-600 hover:text-slate-950"
+                }`}
+              >
+                {type.tipo_beca}
+              </button>
+            ))}
+          </div>
+          )}
+        </div>
+      </div>
+
+      {scholarship ? (
+        <>
+          <div className="mt-6 max-w-full overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full min-w-[1320px] border-collapse text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Nombre</th>
+                  <th className="px-4 py-3">CURP</th>
+                  <th className="px-4 py-3">Nivel</th>
+                  <th className="px-4 py-3">Grado / semestre</th>
+                  <th className="px-4 py-3">Grupo</th>
+                  <th className="px-4 py-3">Estado</th>
+                  <th className="px-4 py-3">Tipo de descuento</th>
+                  <th className="px-4 py-3">Descuento</th>
+                  <th className="px-4 py-3">Aplica a</th>
+                  <th className="px-4 py-3">Descuento desde</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visibleStudents.map((student) => (
+                  <tr key={`${student.curp}-${student.vigencia_desde}`}>
+                    <th scope="row" className="whitespace-nowrap px-4 py-3 text-left font-semibold text-slate-900">{student.nombre}</th>
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{student.curp}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{LEVEL_LABELS[student.nivel]}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{getAcademicGradeLabel(student.nivel, student.grado)}</td>
+                    <td className="px-4 py-3 text-slate-600">{student.grupo}</td>
+                    <td className="whitespace-nowrap px-4 py-3 capitalize text-slate-600">{student.estado === "pausa" ? "En pausa" : student.estado}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{student.tipo_descuento === "monto_fijo" ? "Monto fijo" : "Porcentaje"}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold tabular-nums text-slate-900">{getScholarshipDiscountLabel(student)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{getScholarshipScopeLabel(student.alcance)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{tableDateFormatter.format(new Date(`${student.vigencia_desde}T12:00:00Z`))}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="border-t border-slate-200 bg-slate-50/70">
+                <tr>
+                  <th colSpan={9} scope="row" className="px-4 py-3 text-left font-bold text-slate-950">Subtotal de {scholarship.tipo_beca}</th>
+                  <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-950">{numberFormatter.format(scholarship.total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+            <p>
+              {scholarship.total === 0
+                ? "Sin alumnos en esta beca"
+                : `Mostrando ${(currentPage - 1) * SCHOLARSHIP_ROWS_PER_PAGE + 1}-${Math.min(currentPage * SCHOLARSHIP_ROWS_PER_PAGE, scholarship.total)} de ${scholarship.total} alumnos`}
+            </p>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <button type="button" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Anterior</button>
+                <span className="min-w-14 text-center text-xs font-medium">{currentPage} de {totalPages}</span>
+                <button type="button" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Siguiente</button>
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="mt-6 rounded-xl border border-dashed border-slate-300 px-5 py-10 text-center text-sm text-slate-500">
+          No hay alumnos con beca asignada en este ciclo escolar.
+        </div>
+      )}
     </section>
   );
 }
 
 export default function AdminDashboardPage() {
   const [overview, setOverview] = useState<AdminDashboardOverview | null>(null);
+  const [monthlySummary, setMonthlySummary] =
+    useState<ResumenFinancieroMensual | null>(null);
+  const [dailyClosing, setDailyClosing] = useState<CorteDiario | null>(null);
+  const [studentBreakdown, setStudentBreakdown] =
+    useState<DesgloseAlumnos | null>(null);
+  const [scholarshipBreakdown, setScholarshipBreakdown] =
+    useState<BecadosPorTipo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const loadOverview = useCallback(async () => {
+  const loadOverview = useCallback(async (forceRefresh = false) => {
     setIsLoading(true);
     setError("");
     try {
-      setOverview(await loadDashboardMetrics());
+      if (forceRefresh) {
+        invalidateAdminData("dashboard:");
+        invalidateAdminData("reports:monthly-summary:");
+      }
+      const [
+        overviewData,
+        monthlySummaryData,
+        dailyClosingData,
+        studentBreakdownData,
+        scholarshipBreakdownData,
+      ] = await Promise.all([
+        loadDashboardMetrics(),
+        loadMonthlyFinancialSummary(),
+        loadDailyClosing(),
+        loadStudentBreakdown(),
+        loadScholarshipBreakdown(),
+      ]);
+      setOverview(overviewData);
+      setMonthlySummary(monthlySummaryData);
+      setDailyClosing(dailyClosingData);
+      setStudentBreakdown(studentBreakdownData);
+      setScholarshipBreakdown(scholarshipBreakdownData);
     } catch (caughtError) {
       setError(getErrorMessage(caughtError));
     } finally {
@@ -202,61 +623,6 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
-
-  const finance = overview?.finance;
-  const students = overview?.students;
-  const monthChange = finance?.month_change_percent ?? null;
-  const trendMaximum = Math.max(
-    1,
-    ...(overview?.monthly_trend.map((item) => item.amount) ?? [0]),
-  );
-  const paymentMethodTotal =
-    overview?.payments_by_method.reduce((sum, item) => sum + item.amount, 0) ?? 0;
-
-  const mainCards = [
-    {
-      label: "Recaudado este mes",
-      value: currencyFormatter.format(finance?.collected_month ?? 0),
-      description: `${numberFormatter.format(finance?.payment_count_month ?? 0)} movimientos registrados`,
-      icon: CircleDollarSign,
-      tone: "emerald" as const,
-    },
-    {
-      label: "Saldo vencido histórico",
-      value: currencyFormatter.format(finance?.overdue_balance ?? 0),
-      description: `${numberFormatter.format(finance?.overdue_charges ?? 0)} cargos fuera de fecha`,
-      icon: AlertTriangle,
-      tone: "red" as const,
-    },
-    {
-      label: "Alumnos con adeudo",
-      value: numberFormatter.format(finance?.students_with_overdue ?? 0),
-      description: "Alumnos únicos con saldo vencido",
-      icon: Users,
-      tone: "amber" as const,
-    },
-    {
-      label: "Eficiencia de cobranza",
-      value: `${numberFormatter.format(finance?.collection_rate ?? 0)}%`,
-      description: "Porcentaje cubierto de cargos ya devengados",
-      icon: ShieldCheck,
-      tone: "sky" as const,
-    },
-    {
-      label: "Alumnos activos",
-      value: numberFormatter.format(students?.active ?? 0),
-      description: `${numberFormatter.format(students?.total ?? 0)} alumnos registrados en total`,
-      icon: GraduationCap,
-      tone: "slate" as const,
-    },
-    {
-      label: "Alumnos con beca",
-      value: numberFormatter.format(overview?.scholarships.students ?? 0),
-      description: `${numberFormatter.format(overview?.scholarships.assignments ?? 0)} asignaciones en el ciclo`,
-      icon: BadgePercent,
-      tone: "violet" as const,
-    },
-  ];
 
   return (
     <section className="mx-auto w-full min-w-0 max-w-[1600px] pb-12">
@@ -277,7 +643,7 @@ export default function AdminDashboardPage() {
               </p>
             </div>
           )}
-          <button type="button" onClick={() => void loadOverview()} disabled={isLoading} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+          <button type="button" onClick={() => void loadOverview(true)} disabled={isLoading} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
             <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             Actualizar
           </button>
@@ -294,194 +660,21 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 min-[1720px]:grid-cols-6">
-        {mainCards.map((card) => (
-          <MetricCard key={card.label} {...card} isLoading={isLoading} />
-        ))}
-      </div>
+      {monthlySummary && <FinancialCycleChart summary={monthlySummary} />}
 
-      {isLoading && !overview ? (
+      {dailyClosing && <DailyClosingCard closing={dailyClosing} />}
+
+      {studentBreakdown && <StudentBreakdownCard report={studentBreakdown} />}
+
+      {scholarshipBreakdown && (
+        <ScholarshipBreakdownCard report={scholarshipBreakdown} />
+      )}
+
+      {isLoading && !monthlySummary && (
         <div className="mt-6 flex min-h-72 items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm text-slate-500">
           <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />Preparando indicadores...
         </div>
-      ) : overview ? (
-        <>
-          <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-            <SectionCard title="Cobranza del periodo" description="Indicadores de liquidez, cartera y comportamiento frente al mes anterior.">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <MiniStat label="Cobrado hoy" value={currencyFormatter.format(finance?.collected_today ?? 0)} detail={`${numberFormatter.format(finance?.payment_count_today ?? 0)} movimientos`} icon={Banknote} />
-                <MiniStat label="Ticket promedio" value={currencyFormatter.format(finance?.average_ticket_month ?? 0)} detail="Promedio por movimiento del mes" icon={ReceiptText} />
-                <MiniStat label="Recaudado en ciclo" value={currencyFormatter.format(finance?.collected_cycle ?? 0)} detail={`Ciclo ${overview.cycle}`} icon={WalletCards} />
-                <MiniStat label="Próximos 30 días" value={currencyFormatter.format(finance?.due_next_30_days ?? 0)} detail="Saldo todavía no vencido" icon={CalendarClock} />
-              </div>
-              <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">Comparación mensual</p>
-                  <p className="mt-1 text-xs text-slate-500">Mes anterior: {currencyFormatter.format(finance?.collected_previous_month ?? 0)}</p>
-                </div>
-                {monthChange === null ? (
-                  <span className="text-sm font-semibold text-slate-500">Sin base de comparación</span>
-                ) : (
-                  <span className={`inline-flex items-center gap-1.5 text-sm font-bold ${monthChange >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                    {monthChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                    {monthChange > 0 ? "+" : ""}{numberFormatter.format(monthChange)}%
-                  </span>
-                )}
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Situación académica" description="Distribución del padrón por estado institucional.">
-              <div className="grid grid-cols-2 gap-3">
-                <MiniStat label="Total" value={numberFormatter.format(students?.total ?? 0)} icon={Users} />
-                <MiniStat label="Activos" value={numberFormatter.format(students?.active ?? 0)} icon={CheckCircle2} />
-                <MiniStat label="En pausa" value={numberFormatter.format(students?.paused ?? 0)} icon={PauseCircle} />
-                <MiniStat label="Bajas" value={numberFormatter.format(students?.withdrawn ?? 0)} icon={UserMinus} />
-              </div>
-              <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                Cobertura de becas: <span className="font-semibold text-slate-950">{students?.active ? numberFormatter.format((overview.scholarships.students / students.active) * 100) : 0}%</span> de los alumnos activos · descuento promedio <span className="font-semibold text-slate-950">{numberFormatter.format(overview.scholarships.average_percentage)}%</span>
-              </div>
-            </SectionCard>
-          </div>
-
-          <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-2">
-            <SectionCard title="Tendencia de ingresos" description="Recaudación real de los últimos seis meses.">
-              <div className="flex h-64 items-end gap-2 sm:gap-4">
-                {overview.monthly_trend.map((item) => {
-                  const height = item.amount === 0 ? 4 : Math.max(12, (item.amount / trendMaximum) * 100);
-                  const label = new Intl.DateTimeFormat("es-MX", { month: "short" }).format(new Date(`${item.month}-15T12:00:00`));
-                  return (
-                    <div key={item.month} className="group flex h-full min-w-0 flex-1 flex-col justify-end text-center">
-                      <p className="mb-2 hidden truncate text-xs font-semibold tabular-nums text-slate-700 sm:block">{currencyFormatter.format(item.amount)}</p>
-                      <div className="relative flex h-44 items-end justify-center rounded-lg bg-slate-50 px-1">
-                        <div title={`${currencyFormatter.format(item.amount)} · ${item.count} movimientos`} style={{ height: `${height}%` }} className="w-full max-w-12 rounded-t-md bg-sky-500 transition group-hover:bg-sky-600" />
-                      </div>
-                      <p className="mt-2 text-xs font-medium capitalize text-slate-500">{label}</p>
-                      <p className="mt-0.5 text-[11px] text-slate-400">{item.count} mov.</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Estado de los cargos" description={`Situación de inscripción y mensualidades del ciclo ${overview.cycle}.`}>
-              <div className="space-y-4">
-                {(["pagado", "parcial", "vencido", "pendiente"] as EstatusCobro[]).map((status) => {
-                  const item = overview.account_status.find((row) => row.status === status);
-                  const totalCharges = overview.account_status.reduce((sum, row) => sum + row.count, 0);
-                  const width = totalCharges ? ((item?.count ?? 0) / totalCharges) * 100 : 0;
-                  return (
-                    <div key={status}>
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-2.5 w-2.5 rounded-full ${STATUS_META[status].className}`} />
-                          <span className="font-medium text-slate-700">{STATUS_META[status].label}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-bold tabular-nums text-slate-950">{numberFormatter.format(item?.count ?? 0)}</span>
-                          {status !== "pagado" && <span className="ml-2 text-xs text-slate-500">{currencyFormatter.format(item?.balance ?? 0)}</span>}
-                        </div>
-                      </div>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div className={`h-full rounded-full ${STATUS_META[status].className}`} style={{ width: `${width}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-6 grid grid-cols-2 gap-3">
-                <MiniStat label="Cartera total" value={currencyFormatter.format(finance?.total_receivable ?? 0)} icon={CircleDollarSign} />
-                <MiniStat label="Cargos vencidos" value={numberFormatter.format(finance?.overdue_charges ?? 0)} icon={Clock3} />
-              </div>
-            </SectionCard>
-          </div>
-
-          <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-            <SectionCard title="Alumnos y cartera por nivel" description="Padrón, cobranza del ciclo y saldo pendiente por nivel.">
-              <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
-                <table className="w-full min-w-[520px]">
-                  <thead><tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500"><th className="pb-3 font-semibold">Nivel</th><th className="pb-3 text-right font-semibold">Activos / Total</th><th className="pb-3 text-right font-semibold">Recaudado</th><th className="pb-3 text-right font-semibold">Pendiente</th></tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {overview.students_by_level.map((item) => (
-                      <tr key={item.level}>
-                        <td className="py-4 text-sm font-semibold text-slate-900"><span className="inline-flex items-center gap-2"><School className="h-4 w-4 text-slate-400" />{LEVEL_LABELS[item.level]}</span></td>
-                        <td className="py-4 text-right text-sm tabular-nums text-slate-600">{item.active} / {item.total}</td>
-                        <td className="py-4 text-right text-sm font-semibold tabular-nums text-emerald-700">{currencyFormatter.format(item.collected_cycle)}</td>
-                        <td className="py-4 text-right text-sm font-semibold tabular-nums text-slate-900">{currencyFormatter.format(item.outstanding)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Tipo de cobro" description="Composición de los ingresos del mes actual.">
-              <div className="space-y-4">
-                {overview.payments_by_type.map((item) => {
-                  const total = overview.payments_by_type.reduce((sum, row) => sum + row.amount, 0);
-                  const percentage = total ? (item.amount / total) * 100 : 0;
-                  return (
-                    <div key={item.type} className="min-w-0 rounded-xl border border-slate-200 p-4">
-                      <div className="flex min-w-0 items-start justify-between gap-3">
-                        <div className="min-w-0"><p className="truncate text-sm font-semibold capitalize text-slate-800">{item.type}</p><p className="mt-1 text-xs text-slate-500">{item.count} movimientos</p></div>
-                        <p className="shrink-0 whitespace-nowrap text-xs font-bold tabular-nums text-slate-950 sm:text-sm">{currencyFormatter.format(item.amount)}</p>
-                      </div>
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-sky-500" style={{ width: `${percentage}%` }} /></div>
-                    </div>
-                  );
-                })}
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Métodos de pago" description="Preferencias de pago observadas este mes.">
-              <div className="space-y-4">
-                {overview.payments_by_method.map((item) => {
-                  const percentage = paymentMethodTotal ? (item.amount / paymentMethodTotal) * 100 : 0;
-                  const MethodIcon = item.method === "efectivo" ? Banknote : item.method === "tarjeta" ? CreditCard : Landmark;
-                  return (
-                    <div key={item.method} className="min-w-0">
-                      <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
-                        <span className="inline-flex min-w-0 items-center gap-2 font-medium text-slate-700"><MethodIcon className="h-4 w-4 shrink-0 text-slate-400" /><span className="truncate">{getPaymentMethodLabel(item.method)}</span></span>
-                        <span className="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-950 sm:text-sm">{currencyFormatter.format(item.amount)}</span>
-                      </div>
-                      <div className="mt-2 flex min-w-0 items-center gap-3"><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-500" style={{ width: `${percentage}%` }} /></div><span className="w-12 shrink-0 text-right text-xs text-slate-400">{item.count} mov.</span></div>
-                    </div>
-                  );
-                })}
-              </div>
-            </SectionCard>
-          </div>
-
-          <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,0.6fr)]">
-            <SectionCard title="Actividad reciente" description="Últimos pagos registrados en el sistema.">
-              {overview.recent_payments.length === 0 ? (
-                <p className="rounded-xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">Todavía no hay pagos registrados.</p>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {overview.recent_payments.map((payment) => (
-                    <div key={payment.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">{payment.student_name}</p>
-                        <p className="mt-1 text-xs text-slate-500">{payment.matricula} · <span className="capitalize">{payment.tipo_pago}</span> · {getPaymentMethodLabel(payment.metodo_pago)}</p>
-                      </div>
-                      <div className="shrink-0 sm:text-right">
-                        <p className="text-sm font-bold tabular-nums text-emerald-700">{currencyFormatter.format(payment.monto)}</p>
-                        <p className="mt-1 text-xs text-slate-400">{shortDateFormatter.format(new Date(payment.fecha_pago))}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </SectionCard>
-
-            <SectionCard title="Control y auditoría" description="Correcciones sensibles realizadas durante el mes.">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <MiniStat label="Pagos modificados" value={numberFormatter.format(overview.audit.edits_this_month)} detail="Con motivo y reautenticación" icon={FilePenLine} />
-                <MiniStat label="Pagos eliminados" value={numberFormatter.format(overview.audit.deletions_this_month)} detail="Respaldados en auditoría" icon={Trash2} />
-              </div>
-            </SectionCard>
-          </div>
-        </>
-      ) : null}
+      )}
     </section>
   );
 }

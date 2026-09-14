@@ -2,7 +2,6 @@
 
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
 import { LoaderCircle, X } from "lucide-react";
 import type { StudentListItem } from "@/lib/admin-data";
 import { invalidateAdminData } from "@/lib/admin-data";
@@ -18,15 +17,15 @@ import {
   getReEnrollmentLevel,
 } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { CURP_HELP_TEXT, isValidCurp, normalizeCurp } from "@/lib/curp";
 import { PAYMENT_METHOD_OPTIONS } from "@/lib/payments";
+import { downloadPaymentReceipt } from "@/lib/payment-receipt-client";
 import {
   getDiscountedCost,
   type AppliedScholarship,
 } from "@/lib/scholarships";
 import type {
-  AlumnoInsert,
   ConfiguracionCostos,
-  Database,
   EstadoAlumno,
   MetodoPago,
   MesPago,
@@ -57,25 +56,6 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-function generateTemporaryPassword(name: string, enrollment: string) {
-  const firstName = name.trim().split(/\s+/)[0] ?? "";
-  return `${firstName.slice(0, 2).toLocaleUpperCase("es-MX")}${enrollment.slice(-4).toUpperCase()}`;
-}
-
-function createIsolatedSignUpClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) throw new Error("Falta la configuración de Supabase.");
-
-  return createClient<Database>(url, anonKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-  });
-}
-
 export function QuickPaymentModal({
   student,
   onClose,
@@ -88,6 +68,7 @@ export function QuickPaymentModal({
   const [details, setDetails] = useState<QuickPayment | null>(null);
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<MetodoPago>("efectivo");
+  const [invoiced, setInvoiced] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
@@ -121,7 +102,7 @@ export function QuickPaymentModal({
               .eq("alumno_id", student.id),
             supabase
               .from("alumnos_becas")
-              .select("porcentaje_aplicado, alcance_aplicado, becas!inner(nombre)")
+              .select("tipo_descuento_aplicado, porcentaje_aplicado, monto_fijo_aplicado, alcance_aplicado, vigencia_desde, becas!inner(nombre)")
               .eq("alumno_id", student.id)
               .eq("ciclo_escolar", cycle)
               .maybeSingle(),
@@ -139,11 +120,6 @@ export function QuickPaymentModal({
         const configuration = configurationResult.data as ConfiguracionCostos;
         const payments = paymentsResult.data as Pago[];
         const scholarship = scholarshipResult.data as unknown as AppliedScholarship | null;
-        const effectiveMonthlyCost = getDiscountedCost(
-          configuration.costo_mensualidad,
-          scholarship,
-          "mensualidad",
-        );
         let nextPayment: QuickPayment | null = null;
 
         if (balance.deuda_inscripcion > 0) {
@@ -158,6 +134,12 @@ export function QuickPaymentModal({
         } else {
           for (const academicMonth of ACADEMIC_MONTHS) {
             const year = getAcademicMonthYear(academicMonth.value, cycle);
+            const effectiveMonthlyCost = getDiscountedCost(
+              configuration.costo_mensualidad,
+              scholarship,
+              "mensualidad",
+              { month: academicMonth.value, year },
+            );
             const paid = payments
               .filter(
                 (payment) =>
@@ -214,21 +196,38 @@ export function QuickPaymentModal({
     setError("");
     try {
       const supabase = getSupabaseBrowserClient();
-      const { error: insertError } = await supabase.from("pagos").insert({
-        alumno_id: student.id,
-        monto: numericAmount,
-        tipo_pago: details.paymentType,
-        metodo_pago: paymentMethod,
-        mes: details.month,
-        anio: details.year,
-      });
+      const { data: insertedPayment, error: insertError } = await supabase
+        .from("pagos")
+        .insert({
+          alumno_id: student.id,
+          monto: numericAmount,
+          tipo_pago: details.paymentType,
+          metodo_pago: paymentMethod,
+          facturado: invoiced,
+          mes: details.month,
+          anio: details.year,
+        })
+        .select("id, folio_comprobante")
+        .single();
       if (insertError) throw insertError;
+
+      let receiptDownloaded = true;
+      try {
+        await downloadPaymentReceipt(
+          insertedPayment.id,
+          insertedPayment.folio_comprobante,
+        );
+      } catch {
+        receiptDownloaded = false;
+      }
 
       invalidateAdminData("students:");
       invalidateAdminData("payments:");
       invalidateAdminData("dashboard:");
       invalidateAdminData("reports:");
-      await onSuccess(`Pago de ${currencyFormatter.format(numericAmount)} registrado para ${getFullStudentName(student)}.`);
+      await onSuccess(
+        `Pago de ${currencyFormatter.format(numericAmount)} registrado para ${getFullStudentName(student)}. ${receiptDownloaded ? `Comprobante ${insertedPayment.folio_comprobante} descargado.` : `El comprobante ${insertedPayment.folio_comprobante} quedó disponible en el historial para descargarlo.`}`,
+      );
       onClose();
     } catch (caughtError) {
       setError(getErrorMessage(caughtError, "No fue posible registrar el pago."));
@@ -260,6 +259,7 @@ export function QuickPaymentModal({
             <select id="quick-payment-method" required value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as MetodoPago)} className={fieldClass}>
               {PAYMENT_METHOD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
+            <label className="mt-5 flex items-start gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={invoiced} onChange={(event) => setInvoiced(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" /><span><strong className="block font-medium text-slate-900">Se factura este pago</strong><span className="mt-0.5 block text-xs text-slate-500">Actívalo cuando el movimiento deba incluirse como pago con factura.</span></span></label>
             {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
             <button type="submit" disabled={isSaving} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60">{isSaving && <LoaderCircle className="h-4 w-4 animate-spin" />}{isSaving ? "Registrando..." : "Registrar pago"}</button>
           </form>
@@ -286,6 +286,7 @@ export function StudentDrawer({
   const [paternalSurname, setPaternalSurname] = useState(student?.apellido_paterno ?? "");
   const [maternalSurname, setMaternalSurname] = useState(student?.apellido_materno ?? "");
   const [enrollment, setEnrollment] = useState(student?.matricula ?? "");
+  const [curpPassword, setCurpPassword] = useState("");
   const [level, setLevel] = useState<NivelEscolar>(student?.nivel ?? "primaria");
   const [grade, setGrade] = useState(String(student?.grado ?? 1));
   const [group, setGroup] = useState(student?.grupo ?? "");
@@ -294,13 +295,18 @@ export function StudentDrawer({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const maximumGrade = getMaximumGrade(level);
+  const normalizedCurrentCurp = normalizeCurp(enrollment);
+  const curpChanged =
+    mode === "edit" &&
+    Boolean(student) &&
+    normalizedCurrentCurp !== student?.matricula;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedName = name.trim().replace(/\s+/g, " ");
     const normalizedPaternalSurname = paternalSurname.trim().replace(/\s+/g, " ");
     const normalizedMaternalSurname = maternalSurname.trim().replace(/\s+/g, " ");
-    const normalizedEnrollment = enrollment.trim().toUpperCase();
+    const normalizedEnrollment = normalizeCurp(enrollment);
     const normalizedGroup = group.trim().toUpperCase();
     const numericGrade = Number(grade);
 
@@ -308,8 +314,12 @@ export function StudentDrawer({
       setError("Nombre, apellido paterno y grupo son obligatorios.");
       return;
     }
-    if (!/^[A-Z0-9]{4,30}$/.test(normalizedEnrollment)) {
-      setError("La matrícula debe contener entre 4 y 30 letras o números.");
+    if ((mode === "new" || curpChanged) && !isValidCurp(normalizedEnrollment)) {
+      setError("La CURP no es válida. Revisa los 18 caracteres y el dígito verificador.");
+      return;
+    }
+    if (curpChanged && !curpPassword) {
+      setError("Ingresa tu contraseña para confirmar el cambio de CURP.");
       return;
     }
     if (!Number.isInteger(numericGrade) || numericGrade < 1 || numericGrade > maximumGrade) {
@@ -322,6 +332,21 @@ export function StudentDrawer({
     try {
       const supabase = getSupabaseBrowserClient();
       if (mode === "edit" && student) {
+        if (curpChanged) {
+          const response = await fetch("/api/admin/students/curp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              studentId: student.id,
+              curp: normalizedEnrollment,
+              password: curpPassword,
+            }),
+          });
+          const result = (await response.json()) as { error?: string };
+          if (!response.ok) {
+            throw new Error(result.error || "No fue posible modificar la CURP.");
+          }
+        }
         const { error: updateError } = await supabase
           .from("alumnos")
           .update({
@@ -337,47 +362,47 @@ export function StudentDrawer({
           .eq("id", student.id);
         if (updateError) throw updateError;
         invalidateAdminData("students:");
+        invalidateAdminData("payments:");
         invalidateAdminData("dashboard:");
         invalidateAdminData("reports:");
         await onSuccess(`La información de ${getFullStudentName({ nombre: normalizedName, apellido_paterno: normalizedPaternalSurname, apellido_materno: normalizedMaternalSurname })} se actualizó correctamente.`);
       } else {
-        const { data: existingStudent, error: lookupError } = await supabase
-          .from("alumnos")
-          .select("id")
-          .eq("matricula", normalizedEnrollment)
-          .maybeSingle();
-        if (lookupError) throw lookupError;
-        if (existingStudent) throw new Error("Ya existe un alumno con esa matrícula.");
-
-        const email = `${normalizedEnrollment.toLowerCase()}@alumno.com`;
-        const temporaryPassword = generateTemporaryPassword(normalizedName, normalizedEnrollment);
-        const signUpClient = createIsolatedSignUpClient();
-        const { data: authData, error: signUpError } = await signUpClient.auth.signUp({
-          email,
-          password: temporaryPassword,
-          options: { data: { nombre: normalizedName, apellido_paterno: normalizedPaternalSurname, apellido_materno: normalizedMaternalSurname, matricula: normalizedEnrollment } },
+        const response = await fetch("/api/admin/students/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nombre: normalizedName,
+            apellidoPaterno: normalizedPaternalSurname,
+            apellidoMaterno: normalizedMaternalSurname,
+            curp: normalizedEnrollment,
+            nivel: level,
+            grado: numericGrade,
+            grupo: normalizedGroup,
+            sexo: sex,
+            estado: status,
+          }),
         });
-        if (signUpError) throw signUpError;
-        if (!authData.user || authData.user.identities?.length === 0) throw new Error("Ya existe una cuenta asociada a esta matrícula.");
-
-        const newStudent: AlumnoInsert = {
-          nombre: normalizedName,
-          apellido_paterno: normalizedPaternalSurname,
-          apellido_materno: normalizedMaternalSurname,
-          matricula: normalizedEnrollment,
-          nivel: level,
-          grado: numericGrade,
-          grupo: normalizedGroup,
-          sexo: sex,
-          estado: status,
-          usuario_id: authData.user.id,
+        const responseText = await response.text();
+        let result: {
+          error?: string;
+          credentials?: { email: string; username: string; password: string };
         };
-        const { error: insertError } = await supabase.from("alumnos").insert(newStudent);
-        if (insertError) throw insertError;
+        try {
+          result = responseText ? JSON.parse(responseText) : {};
+        } catch {
+          result = {};
+        }
+        if (!response.ok || !result.credentials) {
+          throw new Error(
+            result.error ||
+              `No fue posible registrar al alumno (error ${response.status}). Revisa la terminal del servidor.`,
+          );
+        }
         invalidateAdminData("students:");
+        invalidateAdminData("payments:");
         invalidateAdminData("dashboard:");
         invalidateAdminData("reports:");
-        await onSuccess(`Alumno registrado. Acceso: ${email} · Contraseña temporal: ${temporaryPassword}`);
+        await onSuccess(`Alumno registrado. Clave: ${result.credentials.username} · Contraseña temporal: ${result.credentials.password}`);
       }
       onClose();
     } catch (caughtError) {
@@ -399,7 +424,10 @@ export function StudentDrawer({
             <label className="text-sm font-medium text-slate-700 sm:col-span-2">Nombre(s)<input required value={name} onChange={(event) => setName(event.target.value)} className={fieldClass} /></label>
             <label className="text-sm font-medium text-slate-700">Apellido paterno<input required value={paternalSurname} onChange={(event) => setPaternalSurname(event.target.value)} className={fieldClass} /></label>
             <label className="text-sm font-medium text-slate-700">Apellido materno<input value={maternalSurname} onChange={(event) => setMaternalSurname(event.target.value)} className={fieldClass} /></label>
-            <label className="text-sm font-medium text-slate-700 sm:col-span-2">Matrícula<input required disabled={mode === "edit"} minLength={4} maxLength={30} value={enrollment} onChange={(event) => setEnrollment(event.target.value)} className={fieldClass} /><span className="mt-1 block text-xs font-normal text-slate-500">{mode === "edit" ? "La matrícula no se modifica porque identifica también la cuenta de acceso." : "Se utilizará para generar el acceso del alumno."}</span></label>
+            <label className="text-sm font-medium text-slate-700 sm:col-span-2">CURP<input required maxLength={18} autoCapitalize="characters" autoComplete="off" value={enrollment} onChange={(event) => setEnrollment(normalizeCurp(event.target.value))} className={fieldClass} /><span className="mt-1 block text-xs font-normal text-slate-500">{CURP_HELP_TEXT}{mode === "edit" && " El correo de acceso existente no cambia."}</span></label>
+            {curpChanged && (
+              <label className="text-sm font-medium text-slate-700 sm:col-span-2">Contraseña del administrador<input required type="password" autoComplete="current-password" value={curpPassword} onChange={(event) => setCurpPassword(event.target.value)} className={fieldClass} /><span className="mt-1 block text-xs font-normal text-slate-500">Necesaria para autorizar y auditar el cambio de CURP.</span></label>
+            )}
             <label className="text-sm font-medium text-slate-700">Nivel<select value={level} onChange={(event) => { setLevel(event.target.value as NivelEscolar); setGrade("1"); }} className={fieldClass}>{ACADEMIC_LEVELS.map((value) => <option key={value} value={value}>{ACADEMIC_LEVEL_LABELS[value]}</option>)}</select></label>
             <label className="text-sm font-medium text-slate-700">{level === "bachillerato" ? "Semestre" : "Grado"}<select value={grade} onChange={(event) => setGrade(event.target.value)} className={fieldClass}>{Array.from({ length: maximumGrade }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{getAcademicGradeLabel(level, value)}</option>)}</select></label>
             <label className="text-sm font-medium text-slate-700">Grupo<input required maxLength={10} value={group} onChange={(event) => setGroup(event.target.value)} className={fieldClass} /></label>

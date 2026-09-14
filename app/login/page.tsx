@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { normalizeLoginIdentifier } from "@/lib/student-access";
 
 const fieldClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
@@ -30,7 +31,7 @@ function getLoginErrorMessage(error: unknown) {
   }
 
   if (message.includes("invalid login credentials")) {
-    return "Correo electrónico o contraseña incorrectos.";
+    return "Usuario o contraseña incorrectos.";
   }
 
   return "No fue posible iniciar sesión. Verifica tus datos e inténtalo nuevamente.";
@@ -38,7 +39,7 @@ function getLoginErrorMessage(error: unknown) {
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -51,7 +52,7 @@ export default function LoginPage() {
     try {
       const supabase = getSupabaseBrowserClient();
       const signInRequest = supabase.auth.signInWithPassword({
-          email: email.trim().toLowerCase(),
+          email: normalizeLoginIdentifier(identifier),
           password,
         });
       const timeout = new Promise<never>((_, reject) => {
@@ -96,26 +97,26 @@ export default function LoginPage() {
           Iniciar sesión
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          Ingresa el correo y la contraseña registrados en Supabase.
+          Ingresa tu clave de acceso o correo administrativo y tu contraseña.
         </p>
 
         <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
           <div>
             <label
-              htmlFor="email"
+              htmlFor="identifier"
               className="mb-2 block text-sm font-medium text-slate-700"
             >
-              Correo electrónico
+              Clave de acceso o correo
             </label>
             <input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
+              id="identifier"
+              name="identifier"
+              type="text"
+              autoComplete="username"
               required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="nombre@escuela.com"
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value)}
+              placeholder="CE260001"
               className={fieldClass}
             />
           </div>
