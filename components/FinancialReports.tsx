@@ -27,8 +27,10 @@ import {
   loadFinancialReportKpis,
   loadFinancialReportPage,
   loadStudentFilterOptions,
+  loadWhatsAppReminderTemplate,
 } from "@/lib/admin-data";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { renderWhatsAppReminderTemplate } from "@/lib/whatsapp-template";
 import type {
   CarteraVencidaAlumno,
   FinancialReportKpis,
@@ -218,12 +220,16 @@ export function FinancialReports() {
     const whatsappWindow = window.open("about:blank", "whatsapp-reminder");
 
     try {
-      const { data: tutor, error: tutorError } = await getSupabaseBrowserClient()
-        .from("tutores_alumnos")
-        .select("nombre, telefono")
-        .eq("alumno_id", row.alumno_id)
-        .eq("posicion", 1)
-        .maybeSingle();
+      const [tutorResult, reminderTemplate] = await Promise.all([
+        getSupabaseBrowserClient()
+          .from("tutores_alumnos")
+          .select("nombre, telefono")
+          .eq("alumno_id", row.alumno_id)
+          .eq("posicion", 1)
+          .maybeSingle(),
+        loadWhatsAppReminderTemplate(),
+      ]);
+      const { data: tutor, error: tutorError } = tutorResult;
 
       if (tutorError) throw tutorError;
       if (!tutor) {
@@ -242,7 +248,12 @@ export function FinancialReports() {
       const debtDetail = row.cargos
         .map((charge) => `• ${charge.concepto}: ${currencyFormatter.format(charge.saldo)} (venció el ${dateFormatter.format(parseDate(charge.fecha_limite))})`)
         .join("\n");
-      const message = `Hola ${tutor.nombre}. Le enviamos un recordatorio del estado de cuenta de ${studentName}. El saldo vencido total es de ${currencyFormatter.format(row.saldo_vencido)}, correspondiente a:\n\n${debtDetail}\n\nSi ya realizó alguno de estos pagos, por favor ignore este mensaje o comuníquese con administración para una aclaración.`;
+      const message = renderWhatsAppReminderTemplate(reminderTemplate, {
+        tutorName: tutor.nombre,
+        studentName,
+        totalAmount: currencyFormatter.format(row.saldo_vencido),
+        debtDetail,
+      });
       const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 
       if (whatsappWindow) {

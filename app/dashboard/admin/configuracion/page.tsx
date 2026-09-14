@@ -18,6 +18,7 @@ import {
   loadConfigurations as fetchConfigurations,
 } from "@/lib/admin-data";
 import { AdminPasswordForm } from "@/components/AdminPasswordForm";
+import { WhatsAppTemplateSettings } from "@/components/WhatsAppTemplateSettings";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   ConfiguracionCostos,
@@ -252,7 +253,7 @@ export default function ConfigurationPage() {
           Configuración
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          Administra los costos escolares y la seguridad de tu cuenta.
+          Administra los costos escolares, los mensajes y la seguridad de tu cuenta.
         </p>
       </div>
 
@@ -475,6 +476,8 @@ export default function ConfigurationPage() {
           </button>
         </div>
       </form>
+
+      <WhatsAppTemplateSettings />
 
       <AdminPasswordForm />
 

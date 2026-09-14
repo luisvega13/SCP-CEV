@@ -980,6 +980,14 @@ export type Database = {
         Args: { p_ciclo_escolar: string };
         Returns: DesgloseAlumnos;
       };
+      obtener_plantilla_recordatorio_whatsapp: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
+      actualizar_plantilla_recordatorio_whatsapp: {
+        Args: { p_plantilla: string };
+        Returns: string;
+      };
       consultar_bajas_alumnos: {
         Args: {
           p_ciclo_escolar: string;

@@ -3,6 +3,7 @@ import {
   getCurrentAcademicMonthIndex,
 } from "@/lib/academic";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { DEFAULT_WHATSAPP_REMINDER_TEMPLATE } from "@/lib/whatsapp-template";
 import type {
   AdminDashboardOverview,
   Alumno,
@@ -337,6 +338,17 @@ export function loadScholarshipBreakdown(cycle = getCurrentAcademicCycle()) {
     });
     if (error) throw error;
     return data as BecadosPorTipo;
+  });
+}
+
+export function loadWhatsAppReminderTemplate() {
+  return loadOnce("configurations:whatsapp-template", async () => {
+    const { data, error } = await getSupabaseBrowserClient().rpc(
+      "obtener_plantilla_recordatorio_whatsapp",
+      {},
+    );
+    if (error) throw error;
+    return data || DEFAULT_WHATSAPP_REMINDER_TEMPLATE;
   });
 }
 
