@@ -123,6 +123,7 @@ export default function StudentsPage() {
   const [gradeFilter, setGradeFilter] = useState("todos");
   const [groupFilter, setGroupFilter] = useState("todos");
   const [statusFilter, setStatusFilter] = useState("todos");
+  const [usualBillingFilter, setUsualBillingFilter] = useState("todos");
   const [sortKey, setSortKey] = useState<SortKey>("nombre");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -151,6 +152,7 @@ export default function StudentsPage() {
         grade: gradeFilter,
         group: groupFilter,
         academicStatus: statusFilter,
+        usualBilling: usualBillingFilter,
         sortKey,
         sortDirection,
       });
@@ -165,7 +167,7 @@ export default function StudentsPage() {
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  }, [currentPage, debouncedSearch, gradeFilter, groupFilter, levelFilter, sortDirection, sortKey, statusFilter]);
+  }, [currentPage, debouncedSearch, gradeFilter, groupFilter, levelFilter, sortDirection, sortKey, statusFilter, usualBillingFilter]);
 
   useEffect(() => {
     void refetchStudents(true);
@@ -304,7 +306,7 @@ export default function StudentsPage() {
           <input id="student-search" type="search" value={search} onChange={(event) => { setSearch(event.target.value); resetPage(); }} placeholder="Buscar por nombre, apellido o CURP..." className="w-full rounded-xl border border-slate-300 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-100" />
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nivel
             <select value={levelFilter} onChange={(event) => { setLevelFilter(event.target.value); setGradeFilter("todos"); setGroupFilter("todos"); resetPage(); }} className={`mt-2 ${selectClass}`}>
               <option value="todos">Todos los niveles</option>
@@ -332,6 +334,13 @@ export default function StudentsPage() {
               <option value="activo">Activo</option>
               <option value="pausa">Pausa temporal</option>
               <option value="baja">Baja definitiva</option>
+            </select>
+          </label>
+          <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Facturación habitual
+            <select value={usualBillingFilter} onChange={(event) => { setUsualBillingFilter(event.target.value); resetPage(); }} className={`mt-2 ${selectClass}`}>
+              <option value="todos">Todos</option>
+              <option value="si">Suelen facturar</option>
+              <option value="no">No suelen facturar</option>
             </select>
           </label>
         </div>

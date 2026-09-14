@@ -65,6 +65,7 @@ export type Alumno = {
   pausa_automatica_inscripcion: boolean;
   fecha_pausa_inscripcion: string | null;
   ciclo_cobro_completo: string | null;
+  factura_habitual: boolean;
 };
 
 export type AlumnoInsert = Omit<
@@ -84,6 +85,7 @@ export type AlumnoInsert = Omit<
   | "pausa_automatica_inscripcion"
   | "fecha_pausa_inscripcion"
   | "ciclo_cobro_completo"
+  | "factura_habitual"
 > & {
   id?: string;
   fecha_alta?: string;
@@ -100,6 +102,7 @@ export type AlumnoInsert = Omit<
   pausa_automatica_inscripcion?: boolean;
   fecha_pausa_inscripcion?: string | null;
   ciclo_cobro_completo?: string | null;
+  factura_habitual?: boolean;
 };
 export type AlumnoUpdate = Partial<AlumnoInsert>;
 
@@ -934,6 +937,13 @@ export type Database = {
       obtener_filtros_directorio_alumnos: {
         Args: Record<string, never>;
         Returns: StudentFilterOptions;
+      };
+      actualizar_preferencia_facturacion_alumno: {
+        Args: {
+          p_alumno_id: string;
+          p_factura_habitual: boolean;
+        };
+        Returns: boolean;
       };
       guardar_responsable_fiscal_alumno: {
         Args: {

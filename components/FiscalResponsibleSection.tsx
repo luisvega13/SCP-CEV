@@ -17,6 +17,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import { invalidateAdminData } from "@/lib/admin-data";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type {
   AlumnoResponsableFiscal,
@@ -161,7 +162,10 @@ export function FiscalResponsibleSection({ studentId }: { studentId: string }) {
   const [cfdiUses, setCfdiUses] = useState<CatalogoUsoCfdi[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingPreference, setIsSavingPreference] = useState(false);
+  const [usuallyInvoices, setUsuallyInvoices] = useState(false);
   const [error, setError] = useState("");
+  const [preferenceError, setPreferenceError] = useState("");
   const [formError, setFormError] = useState("");
   const [message, setMessage] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -171,9 +175,10 @@ export function FiscalResponsibleSection({ studentId }: { studentId: string }) {
   const loadFiscalData = useCallback(async () => {
     setIsLoading(true);
     setError("");
+    setPreferenceError("");
     try {
       const supabase = getSupabaseBrowserClient();
-      const [relationsResult, regimesResult, usesResult] = await Promise.all([
+      const [relationsResult, regimesResult, usesResult, preferenceResult] = await Promise.all([
         supabase
           .from("alumnos_responsables_fiscales")
           .select("*, responsables_fiscales(*)")
@@ -190,10 +195,16 @@ export function FiscalResponsibleSection({ studentId }: { studentId: string }) {
           .select("*")
           .eq("activo", true)
           .order("clave"),
+        supabase
+          .from("alumnos")
+          .select("factura_habitual")
+          .eq("id", studentId)
+          .single(),
       ]);
       if (relationsResult.error) throw relationsResult.error;
       if (regimesResult.error) throw regimesResult.error;
       if (usesResult.error) throw usesResult.error;
+      if (preferenceResult.error) throw preferenceResult.error;
       if (regimesResult.data.length === 0 || usesResult.data.length === 0) {
         throw new Error(
           "Los catálogos existen, pero la sesión actual no recibió filas. Ejecuta la migración 023 para corregir sus políticas RLS.",
@@ -202,6 +213,7 @@ export function FiscalResponsibleSection({ studentId }: { studentId: string }) {
       setRelations(relationsResult.data as unknown as FiscalRelation[]);
       setRegimes(regimesResult.data);
       setCfdiUses(usesResult.data);
+      setUsuallyInvoices(preferenceResult.data.factura_habitual);
     } catch (caughtError) {
       setError(getErrorMessage(caughtError, "No fue posible cargar la información fiscal."));
     } finally {
@@ -275,6 +287,31 @@ export function FiscalResponsibleSection({ studentId }: { studentId: string }) {
       setCopiedKey(key);
     } catch (caughtError) {
       setError(getErrorMessage(caughtError, "No fue posible copiar el dato."));
+    }
+  }
+
+  async function updateBillingPreference(nextValue: boolean) {
+    setIsSavingPreference(true);
+    setPreferenceError("");
+    setMessage("");
+    try {
+      const { error: updateError } = await getSupabaseBrowserClient().rpc(
+        "actualizar_preferencia_facturacion_alumno",
+        {
+          p_alumno_id: studentId,
+          p_factura_habitual: nextValue,
+        },
+      );
+      if (updateError) throw updateError;
+      setUsuallyInvoices(nextValue);
+      invalidateAdminData("students:");
+      setMessage("Preferencia de facturación actualizada correctamente.");
+    } catch (caughtError) {
+      setPreferenceError(
+        getErrorMessage(caughtError, "No fue posible actualizar la preferencia de facturación."),
+      );
+    } finally {
+      setIsSavingPreference(false);
     }
   }
 
@@ -371,7 +408,25 @@ export function FiscalResponsibleSection({ studentId }: { studentId: string }) {
         <p>Captura los valores exactamente como aparecen en la Constancia de Situación Fiscal.</p>
       </div>
 
-      {error && <div role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><p className="font-semibold">No se pudieron cargar los catálogos fiscales</p><p className="mt-1">{error}</p></div>}
+      <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700 shadow-sm transition hover:border-slate-300">
+        <input
+          type="checkbox"
+          checked={usuallyInvoices}
+          disabled={isLoading || isSavingPreference || Boolean(error)}
+          onChange={(event) => void updateBillingPreference(event.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 disabled:cursor-wait"
+        />
+        <span className="min-w-0">
+          <strong className="block text-slate-900">Este alumno suele solicitar factura</strong>
+          <span className="mt-1 block text-xs leading-5 text-slate-500">
+            Permite identificarlo rápidamente mediante el filtro de facturación habitual del directorio de alumnos.
+          </span>
+          {isSavingPreference && <span className="mt-1 block text-xs font-medium text-sky-700">Guardando preferencia...</span>}
+        </span>
+      </label>
+
+      {error && <div role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><p className="font-semibold">No se pudo cargar la información fiscal</p><p className="mt-1">{error}</p></div>}
+      {preferenceError && <p role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{preferenceError}</p>}
       {message && <p role="status" className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</p>}
 
       {isLoading ? (

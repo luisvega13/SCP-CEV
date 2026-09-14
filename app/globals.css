@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand-navy: #0a1142;
+  --brand-red: #7a0000;
+  --brand-gold: #c79a35;
+}
+
 * { box-sizing: border-box; }
 html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
-body { margin: 0; color: rgb(15 23 42); background: rgb(248 250 252); }
+html { accent-color: var(--brand-navy); }
+body {
+  margin: 0;
+  color: rgb(15 23 42);
+  background: #f7f8fa;
+}
+
+::selection {
+  color: white;
+  background: var(--brand-navy);
+}
