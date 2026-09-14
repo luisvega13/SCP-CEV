@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import type { MouseEvent } from "react";
 import { useEffect, useState } from "react";
@@ -96,28 +97,36 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
         <div
           role="status"
           aria-live="polite"
-          className="fixed inset-x-0 top-0 z-[60] h-1 overflow-hidden bg-sky-950/20"
+          className="fixed inset-x-0 top-0 z-[60] h-1 overflow-hidden bg-brand-navy/20"
         >
-          <div className="h-full w-full animate-pulse bg-sky-400" />
+          <div className="h-full w-full animate-pulse bg-brand-red" />
           <span className="sr-only">Cargando sección...</span>
         </div>
       )}
-      <header className="fixed left-0 top-0 z-30 flex h-16 w-[100dvw] max-w-[100dvw] items-center justify-between border-b bg-white px-4 lg:hidden">
+      <header className="fixed left-0 top-0 z-30 flex h-16 w-[100dvw] max-w-[100dvw] items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm lg:hidden">
         <Link
           href={dashboardHome}
           onClick={(event) => handleNavigation(event, dashboardHome)}
           onMouseEnter={() => handlePreload(dashboardHome)}
           onFocus={() => handlePreload(dashboardHome)}
-          className="font-semibold"
+          className="flex min-w-0 items-center gap-2.5 font-semibold text-brand-navy"
         >
-          Portal Escolar
+          <Image
+            src="/logo-cejv-comprobante.png"
+            alt="Logo de la Sociedad de Educación Integral San Nicolás"
+            width={42}
+            height={28}
+            className="h-9 w-12 shrink-0 object-contain"
+            priority
+          />
+          <span className="truncate">Portal Escolar</span>
         </Link>
-        <button type="button" onClick={() => setIsOpen(!isOpen)} className="rounded-lg border p-2" aria-label="Abrir menú" aria-expanded={isOpen}>
+        <button type="button" onClick={() => setIsOpen(!isOpen)} className="rounded-lg border border-slate-300 p-2 text-brand-navy transition hover:border-brand-navy hover:bg-slate-50" aria-label="Abrir menú" aria-expanded={isOpen}>
           <span className="block h-0.5 w-5 bg-current" /><span className="my-1 block h-0.5 w-5 bg-current" /><span className="block h-0.5 w-5 bg-current" />
         </button>
       </header>
       {isOpen && <button type="button" className="fixed inset-0 z-30 bg-slate-950/40 lg:hidden" onClick={() => setIsOpen(false)} aria-label="Cerrar menú" />}
-      <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-950 px-4 py-6 text-white transition-transform lg:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-brand-navy px-4 py-6 text-white shadow-xl transition-transform lg:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <Link
           href={dashboardHome}
           onClick={(event) => handleNavigation(event, dashboardHome)}
@@ -125,16 +134,28 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
           onFocus={() => handlePreload(dashboardHome)}
           aria-current={pathname === dashboardHome ? "page" : undefined}
           aria-busy={pendingHref === dashboardHome}
-          className={`mb-8 block rounded-lg px-3 py-2 transition hover:bg-slate-900 ${
+          className={`mb-8 flex items-center gap-3 rounded-xl border border-white/10 px-3 py-3 transition hover:bg-white/[0.06] ${
             pathname === dashboardHome || pendingHref === dashboardHome
-              ? "bg-slate-900 ring-1 ring-slate-800"
+              ? "bg-white/[0.07] ring-1 ring-white/10"
               : ""
           }`}
         >
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-400">
-            Portal Escolar
-          </p>
-          <p className="mt-2 text-xl font-semibold">Gestión de pagos</p>
+          <Image
+            src="/logo-cejv-comprobante.png"
+            alt="Logo de la Sociedad de Educación Integral San Nicolás"
+            width={62}
+            height={42}
+            className="h-12 w-16 shrink-0 object-contain"
+            priority
+          />
+          <span className="min-w-0">
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-[#e2bd64]">
+              Portal Escolar
+            </span>
+            <span className="mt-1 block text-base font-semibold leading-tight text-white">
+              Gestión escolar
+            </span>
+          </span>
         </Link>
         <nav className="flex-1 space-y-1" aria-label="Navegación principal">
           {linksByRole[role].map((link) => {
@@ -151,24 +172,24 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
                 aria-busy={isPending}
                 className={`flex items-center justify-between gap-3 rounded-lg border-l-2 px-3 py-2.5 text-sm font-medium transition ${
                   isPending
-                    ? "border-sky-300 bg-sky-500/20 text-white ring-1 ring-inset ring-sky-400/30"
+                    ? "border-brand-red bg-white/10 text-white ring-1 ring-inset ring-white/15"
                     : isActive
-                      ? "border-sky-400 bg-slate-800 text-white"
-                    : "border-transparent text-slate-300 hover:bg-slate-800 hover:text-white"
+                      ? "border-brand-red bg-white/10 text-white"
+                    : "border-transparent text-slate-300 hover:bg-white/[0.07] hover:text-white"
                 }`}
               >
                 <span>{link.label}</span>
                 {isPending && (
                   <span
                     aria-hidden="true"
-                    className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-sky-200 border-t-transparent"
+                    className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#e2bd64] border-t-transparent"
                   />
                 )}
               </Link>
             );
           })}
         </nav>
-        <div className="border-t border-slate-800 px-3 pt-4">
+        <div className="border-t border-white/15 px-3 pt-4">
           <p className="truncate text-sm font-medium">{userName}</p>
           <p className="mt-1 text-xs text-slate-400">
             {role === "admin" ? "Administrador" : "Alumno"}
@@ -177,7 +198,7 @@ export function Sidebar({ role, userName = "Usuario" }: SidebarProps) {
             type="button"
             onClick={handleSignOut}
             disabled={isSigningOut}
-            className="mt-4 w-full rounded-lg border border-slate-700 px-3 py-2 text-left text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-4 w-full rounded-lg border border-white/20 px-3 py-2 text-left text-sm font-medium text-slate-200 transition hover:border-white/35 hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSigningOut ? "Cerrando sesión..." : "Cerrar sesión"}
           </button>

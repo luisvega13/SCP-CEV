@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -7,7 +8,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { normalizeLoginIdentifier } from "@/lib/student-access";
 
 const fieldClass =
-  "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-100";
+  "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-brand-navy focus:ring-2 focus:ring-sky-100";
 
 const AUTH_TIMEOUT_MS = 15_000;
 
@@ -88,15 +89,25 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-12">
-      <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm sm:p-10">
-        <p className="text-sm font-semibold uppercase tracking-wider text-sky-600">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f4f5f8] px-4 py-12 before:absolute before:inset-x-0 before:top-0 before:h-1.5 before:bg-brand-red">
+      <section className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-[0_18px_50px_rgba(10,17,66,0.10)] sm:p-10">
+        <div className="mb-7 flex justify-center">
+          <Image
+            src="/logo-cejv-comprobante.png"
+            alt="Logo de la Sociedad de Educación Integral San Nicolás A.C."
+            width={150}
+            height={86}
+            className="h-auto w-36 object-contain"
+            priority
+          />
+        </div>
+        <p className="text-center text-xs font-semibold uppercase tracking-[0.18em] text-brand-red">
           Portal escolar
         </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
+        <h1 className="mt-2 text-center text-3xl font-bold tracking-tight text-brand-navy">
           Iniciar sesión
         </h1>
-        <p className="mt-2 text-sm text-slate-500">
+        <p className="mt-2 text-center text-sm text-slate-500">
           Ingresa tu clave de acceso o correo administrativo y tu contraseña.
         </p>
 
@@ -153,7 +164,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-lg bg-brand-navy px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-brand-navy focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting ? "Ingresando..." : "Entrar"}
           </button>

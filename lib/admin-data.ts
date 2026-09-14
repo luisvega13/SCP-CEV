@@ -71,6 +71,7 @@ export type StudentListItem = Pick<
   | "deuda_inscripcion"
   | "ciclo_grado_actual"
   | "promocion_habilitada"
+  | "factura_habitual"
 > & {
   /** Saldo cuya fecha limite ya paso; no incluye cargos futuros. */
   saldo_vencido: number;
@@ -113,6 +114,7 @@ export type StudentDirectoryQuery = {
   grade: string;
   group: string;
   academicStatus: string;
+  usualBilling: string;
   sortKey: "matricula" | "nombre" | "trayectoria" | "estado";
   sortDirection: "asc" | "desc";
 };
@@ -125,6 +127,7 @@ const defaultStudentQuery: StudentDirectoryQuery = {
   grade: "todos",
   group: "todos",
   academicStatus: "todos",
+  usualBilling: "todos",
   sortKey: "nombre",
   sortDirection: "asc",
 };
@@ -138,7 +141,7 @@ export function loadStudents(params: Partial<StudentDirectoryQuery> = {}) {
     let query = supabase
       .from("alumnos")
       .select(
-        "id, nombre, apellido_paterno, apellido_materno, matricula, nivel, grado, grupo, estado, sexo, deuda_mensualidad, deuda_inscripcion, ciclo_grado_actual, promocion_habilitada",
+        "id, nombre, apellido_paterno, apellido_materno, matricula, nivel, grado, grupo, estado, sexo, deuda_mensualidad, deuda_inscripcion, ciclo_grado_actual, promocion_habilitada, factura_habitual",
         { count: "exact" },
       )
       .range(from, from + queryParams.pageSize - 1);
@@ -157,6 +160,9 @@ export function loadStudents(params: Partial<StudentDirectoryQuery> = {}) {
         "estado",
         queryParams.academicStatus as Alumno["estado"],
       );
+    }
+    if (queryParams.usualBilling !== "todos") {
+      query = query.eq("factura_habitual", queryParams.usualBilling === "si");
     }
 
     if (queryParams.sortKey === "nombre") {
